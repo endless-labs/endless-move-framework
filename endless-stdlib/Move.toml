@@ -1,0 +1,12 @@
+[package]
+name = "EndlessStdlib"
+version = "1.0.0"
+
+[addresses]
+std = "0x1"
+endless_std = "0x1"
+endless_framework = "0x1"
+Extensions = "0x1" # For Prover to instantiate `{{Ext}}` in prelude.
+
+[dependencies]
+MoveStdlib = { local = "../move-stdlib" }

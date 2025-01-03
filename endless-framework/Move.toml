@@ -1,0 +1,15 @@
+[package]
+name = "EndlessFramework"
+version = "1.0.0"
+
+[addresses]
+std = "0x1"
+endless_std = "0x1"
+endless_framework = "0x1"
+endless_token = "0x4"
+core_resources = "0x49DAD7"
+vm_reserved = "0x0"
+
+[dependencies]
+EndlessStdlib = { local = "../endless-stdlib" }
+MoveStdlib = { local = "../move-stdlib" }

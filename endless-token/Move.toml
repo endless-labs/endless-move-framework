@@ -1,0 +1,13 @@
+[package]
+name = "EndlessToken"
+version = "1.0.0"
+
+[addresses]
+std = "0x1"
+endless_std = "0x1"
+endless_framework = "0x1"
+endless_token = "0x4"
+
+[dependencies]
+MoveStdlib = { local = "../move-stdlib" }
+EndlessFramework = { local = "../endless-framework" }

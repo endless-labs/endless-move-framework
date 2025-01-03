@@ -1,0 +1,48 @@
+---
+compiled_package_info:
+  package_name: EndlessToken
+  address_alias_instantiation:
+    Extensions: "0000000000000000000000000000000000000000000000000000000000000001"
+    core_resources: 000000000000000000000000000000000000000000000000000000000049dad7
+    endless_framework: "0000000000000000000000000000000000000000000000000000000000000001"
+    endless_std: "0000000000000000000000000000000000000000000000000000000000000001"
+    endless_token: "0000000000000000000000000000000000000000000000000000000000000004"
+    std: "0000000000000000000000000000000000000000000000000000000000000001"
+    vm: "0000000000000000000000000000000000000000000000000000000000000000"
+    vm_reserved: "0000000000000000000000000000000000000000000000000000000000000000"
+  source_digest: 5699688DE279EAC2877E74619BC0ED1E1C874B3F5C625300926E0303F604F198
+  build_flags:
+    dev_mode: false
+    test_mode: false
+    generate_docs: false
+    generate_abis: true
+    generate_move_model: true
+    full_model_generation: false
+    install_dir: ~
+    force_recompilation: false
+    additional_named_addresses: {}
+    architecture: ~
+    fetch_deps_only: false
+    skip_fetch_latest_git_deps: true
+    compiler_config:
+      bytecode_version: ~
+      known_attributes:
+        - bytecode_instruction
+        - deprecated
+        - event
+        - expected_failure
+        - legacy_entry_fun
+        - legacy_entry_function
+        - native_interface
+        - resource_group
+        - resource_group_member
+        - test
+        - test_only
+        - verify_only
+        - view
+      skip_attribute_checks: false
+      compiler_version: ~
+dependencies:
+  - EndlessFramework
+  - EndlessStdlib
+  - MoveStdlib
