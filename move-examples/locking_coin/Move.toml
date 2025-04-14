@@ -1,0 +1,12 @@
+[package]
+name = "locking"
+version = "0.0.0"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }
+
+
+[addresses]
+locking = "b028e6b12bfb2eb241d9a49028b97c2d02cbfbd2a92143b3b283473f48b5be0a"
+
+

@@ -1,0 +1,11 @@
+[package]
+name = "PostMint"
+version = "0.0.0"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }
+EndlessToken = { local = "../../framework/endless-token" }
+
+[addresses]
+endless_framework = "0x1"
+post_mint_reveal_nft = "_"

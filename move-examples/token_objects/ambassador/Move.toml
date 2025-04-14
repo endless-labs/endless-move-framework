@@ -1,0 +1,11 @@
+[package]
+name = 'ambassador'
+version = '1.0.0'
+
+# do not change to "_", concrete address needed for module-publish testing framework
+[addresses]
+ambassador = "0xCAFE"
+
+[dependencies]
+EndlessFramework = { local = "../../../framework/endless-framework" }
+EndlessToken = { local = "../../../framework/endless-token" }

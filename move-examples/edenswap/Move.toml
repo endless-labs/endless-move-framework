@@ -1,0 +1,9 @@
+[package]
+name = "edenswap"
+version = "0.0.0"
+
+[addresses]
+edenswap = "86265890a745ab83be562975d8d3b21faf3adf15c5fce547a92f174985a10fef"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }

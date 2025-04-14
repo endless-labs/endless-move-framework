@@ -1,0 +1,9 @@
+[package]
+name = "LuckyBox"
+version = "1.0.0"
+
+[addresses]
+lucky_box = "_"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }

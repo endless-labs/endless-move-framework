@@ -1,0 +1,11 @@
+[package]
+name = "basic_coin"
+version = "0.0.0"
+
+[addresses]
+named_addr = "0xCAFE"
+
+[dependencies.EndlessStdlib]
+git = 'https://github.com/endless-labs/endless-core.git'
+rev = 'main'
+subdir = 'endless-move/framework/endless-stdlib'

@@ -1,0 +1,15 @@
+[package]
+name = "fixed_swap"
+version = "1.0.0"
+authors = []
+
+[addresses]
+fixed_swap = "_"
+
+[dev-addresses]
+fixed_swap = "0xcafe"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }
+
+[dev-dependencies]

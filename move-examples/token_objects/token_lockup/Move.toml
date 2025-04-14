@@ -1,0 +1,10 @@
+[package]
+name = 'token_lockup'
+version = '1.0.0'
+
+[addresses]
+token_lockup = "_"
+
+[dependencies]
+EndlessFramework = { local = "../../../framework/endless-framework" }
+EndlessToken = { local = "../../../framework/endless-token" }

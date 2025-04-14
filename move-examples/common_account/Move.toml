@@ -1,0 +1,9 @@
+[package]
+name = "CommonAccount"
+version = "1.0.0"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }
+
+[addresses]
+common_account = "_"

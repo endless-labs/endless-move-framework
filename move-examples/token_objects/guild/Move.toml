@@ -1,0 +1,10 @@
+[package]
+name = 'guild'
+version = '1.0.0'
+
+[addresses]
+guild = "_"
+
+[dependencies]
+EndlessFramework = { local = "../../../framework/endless-framework" }
+EndlessToken = { local = "../../../framework/endless-token" }

@@ -1,0 +1,10 @@
+[package]
+name = "MessageBoard"
+version = "0.0.1"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }
+
+[addresses]
+std = "0x1"
+message_board = "_"

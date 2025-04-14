@@ -1,0 +1,9 @@
+[package]
+name = "Faucets"
+version = "0.0.0"
+
+[addresses]
+faucet = "_"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }

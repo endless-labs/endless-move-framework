@@ -1,0 +1,19 @@
+[package]
+name = "cli_e2e_tests"
+version = "0.0.1"
+
+[addresses]
+addr = "_"
+
+[dev-addresses]
+addr = "0x12345"
+
+[dependencies.EndlessFramework]
+git = "https://github.com/endless-labs/endless-core.git"
+rev = "mainnet"
+subdir = "endless-move/framework/endless-framework"
+
+[dependencies.EndlessToken]
+git = "https://github.com/endless-labs/endless-core.git"
+rev = "mainnet"
+subdir = "endless-move/framework/endless-token"

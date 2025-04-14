@@ -1,0 +1,6 @@
+[package]
+name = "GenericGroth16"
+version = "0.0.0"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }

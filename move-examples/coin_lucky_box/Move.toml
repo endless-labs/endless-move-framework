@@ -1,0 +1,12 @@
+[package]
+name = "CoinLuckyBox"
+version = "1.0.0"
+
+[addresses]
+coin_lucky_box = "_"
+
+[dev-addresses]
+coin_lucky_box = "0xcafe"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }

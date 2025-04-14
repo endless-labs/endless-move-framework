@@ -1,0 +1,11 @@
+# Exercise 1
+endless move test --dump
+
+# Exercise 2
+endless move test --coverage
+
+Followed by:
+
+endless move coverage summary
+endless move coverage summary --summarize-functions
+endless move coverage source --module basic_coin

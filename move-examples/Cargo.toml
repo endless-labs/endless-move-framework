@@ -1,0 +1,29 @@
+[package]
+name = "endless-move-examples"
+description = "Move examples"
+version = "0.1.0"
+
+# Workspace inherited keys
+authors = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+publish = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+
+[dependencies]
+endless-framework = { workspace = true }
+endless-gas-schedule = { workspace = true }
+endless-types = { workspace = true }
+endless-vm ={ workspace = true, features = ["testing"] }
+clap = { workspace = true }
+move-cli = { workspace = true }
+move-package = { workspace = true }
+move-prover = { workspace = true }
+move-unit-test = { workspace = true }
+move-vm-runtime = { workspace = true }
+
+[dev-dependencies]
+endless-framework = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }

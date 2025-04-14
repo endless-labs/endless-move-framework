@@ -1,0 +1,13 @@
+[package]
+name = "DrandLottery"
+version = "0.0.1"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }
+#EndlessStdlib = { local = "../../framework/endless-stdlib" }
+
+[addresses]
+std = "0x1"
+endless_std = "0x1"
+endless_framework = "0x1"
+drand = "_"

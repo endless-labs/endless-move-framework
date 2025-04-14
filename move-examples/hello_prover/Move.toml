@@ -1,0 +1,10 @@
+[package]
+name = "hello_prover"
+version = "0.0.0"
+
+[dependencies]
+EndlessFramework = { git = "https://github.com/endless-labs/endless-core.git", subdir = "endless-move/framework/endless-framework/", rev = "main" }
+
+[addresses]
+
+

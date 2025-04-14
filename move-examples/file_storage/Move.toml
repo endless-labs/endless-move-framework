@@ -1,0 +1,12 @@
+[package]
+name = "pofs"
+version = "0.0.0"
+
+[addresses]
+file_storage = "0x0a77a70ba03b094d5a240c2be820ed0be79788fd9606a9014a7a325f94398a07"
+provider = "0xbabe"
+client = "0a77a70ba03b094d5a240c2be820ed0be79788fd9606a9014a7a325f94398a07"
+challenger = "0xccaaee"
+
+[dependencies]
+EndlessFramework = { local = "../../framework/endless-framework" }

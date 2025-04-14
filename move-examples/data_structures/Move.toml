@@ -1,0 +1,9 @@
+[package]
+name = "DataStructure"
+version = "0.0.1"
+
+[dependencies]
+EndlessStdlib = { local = "../../framework/endless-stdlib" }
+
+[addresses]
+std = "0x1"

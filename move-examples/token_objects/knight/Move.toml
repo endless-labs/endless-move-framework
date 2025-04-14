@@ -1,0 +1,10 @@
+[package]
+name = 'knight'
+version = '1.0.0'
+
+[addresses]
+knight = "_"
+
+[dependencies]
+EndlessFramework = { local = "../../../framework/endless-framework" }
+EndlessToken = { local = "../../../framework/endless-token" }

@@ -1,0 +1,12 @@
+[package]
+name = "ManagedFungibleAsset"
+version = "0.0.0"
+
+[addresses]
+endless_framework = "0x1"
+endless_token = "0x4"
+example_addr = "_"
+
+[dependencies]
+EndlessFramework = { local = "../../../framework/endless-framework" }
+EndlessToken = { local = "../../../framework/endless-token" }

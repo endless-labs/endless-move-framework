@@ -1,0 +1,7 @@
+[package]
+name = "TooLargeTest"
+version = "0.0.0"
+
+[dependencies]
+EndlessFramework = { local = "../../../framework/endless-framework" }
+MoveStdlib = { local = "../../../framework/move-stdlib" }

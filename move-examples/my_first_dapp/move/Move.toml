@@ -1,0 +1,9 @@
+[package]
+name = 'my_todo_list'
+version = '1.0.0'
+[dependencies.EndlessFramework]
+git = 'https://github.com/endless-labs/endless-core.git'
+rev = 'main'
+subdir = 'endless-move/framework/endless-framework'
+[addresses]
+todolist_addr='_'
