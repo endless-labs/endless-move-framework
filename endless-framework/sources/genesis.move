@@ -30,6 +30,7 @@ module endless_framework::genesis {
     use endless_framework::transaction_validation;
     use endless_framework::version;
     use endless_framework::vesting;
+    use endless_framework::nonce_validation;
     const EDUPLICATE_ACCOUNT: u64 = 1;
     const EACCOUNT_DOES_NOT_EXIST: u64 = 2;
 
@@ -129,6 +130,7 @@ module endless_framework::genesis {
         state_storage::initialize(&endless_framework_account);
         timestamp::set_time_has_started(&endless_framework_account);
         endless_governance::initialize_partial_voting(&endless_framework_account);
+        nonce_validation::initialize(&endless_framework_account);
     }
 
     /// Genesis step 2: Initialize Endless coin and transaction fee distribution.

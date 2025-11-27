@@ -39,6 +39,7 @@ the return on investment didn't seem worth it for these simple functions.
 -  [Function `remove`](#0x1_vector_remove)
 -  [Function `remove_value`](#0x1_vector_remove_value)
 -  [Function `swap_remove`](#0x1_vector_swap_remove)
+-  [Function `replace`](#0x1_vector_replace)
 -  [Function `for_each`](#0x1_vector_for_each)
 -  [Function `for_each_reverse`](#0x1_vector_for_each_reverse)
 -  [Function `for_each_ref`](#0x1_vector_for_each_ref)
@@ -795,6 +796,39 @@ Aborts if <code>i</code> is out of bounds.
     <b>let</b> last_idx = <a href="vector.md#0x1_vector_length">length</a>(v) - 1;
     <a href="vector.md#0x1_vector_swap">swap</a>(v, i, last_idx);
     <a href="vector.md#0x1_vector_pop_back">pop_back</a>(v)
+}
+</code></pre>
+
+
+
+</details>
+
+<a id="0x1_vector_replace"></a>
+
+## Function `replace`
+
+Replace the <code>i</code>th element of the vector <code>self</code> with the given value, and return
+to the caller the value that was there before.
+Aborts if <code>i</code> is out of bounds.
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="vector.md#0x1_vector_replace">replace</a>&lt;Element&gt;(self: &<b>mut</b> <a href="vector.md#0x1_vector">vector</a>&lt;Element&gt;, i: u64, val: Element): Element
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="vector.md#0x1_vector_replace">replace</a>&lt;Element&gt;(self: &<b>mut</b> <a href="vector.md#0x1_vector">vector</a>&lt;Element&gt;, i: u64, val: Element): Element {
+    // <b>let</b> last_idx = self.<a href="vector.md#0x1_vector_length">length</a>();
+    <b>let</b> last_idx = <a href="vector.md#0x1_vector_length">length</a>(self);
+    <b>assert</b>!(i &lt; last_idx, <a href="vector.md#0x1_vector_EINDEX_OUT_OF_BOUNDS">EINDEX_OUT_OF_BOUNDS</a>);
+
+    <a href="vector.md#0x1_vector_push_back">push_back</a>(self, val);
+    <a href="vector.md#0x1_vector_swap">swap</a>(self, i, last_idx);
+    <a href="vector.md#0x1_vector_pop_back">pop_back</a>(self)
 }
 </code></pre>
 

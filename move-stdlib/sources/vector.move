@@ -9,6 +9,7 @@
 /// Move functions here because many have loops, requiring loop invariants to prove, and
 /// the return on investment didn't seem worth it for these simple functions.
 module std::vector {
+
     /// The index into the vector is out of bounds
     const EINDEX_OUT_OF_BOUNDS: u64 = 0x20000;
 
@@ -264,6 +265,19 @@ module std::vector {
     }
     spec swap_remove {
         pragma intrinsic = true;
+    }
+
+    /// Replace the `i`th element of the vector `self` with the given value, and return
+    /// to the caller the value that was there before.
+    /// Aborts if `i` is out of bounds.
+    public fun replace<Element>(self: &mut vector<Element>, i: u64, val: Element): Element {
+        // let last_idx = self.length();
+        let last_idx = length(self);
+        assert!(i < last_idx, EINDEX_OUT_OF_BOUNDS);
+
+        push_back(self, val);
+        swap(self, i, last_idx);
+        pop_back(self)
     }
 
     /// Apply the function to each element in the vector, consuming it.

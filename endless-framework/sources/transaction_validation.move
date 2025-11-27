@@ -4,6 +4,7 @@ module endless_framework::transaction_validation {
     use std::signer;
     use std::vector;
     use std::bcs;
+    use std::option;
 
     use endless_framework::account;
     use endless_framework::endless_coin;
@@ -13,8 +14,11 @@ module endless_framework::transaction_validation {
     use endless_framework::timestamp;
     use endless_framework::transaction_fee;
     use endless_framework::object;
+    use endless_framework::nonce_validation;
 
     friend endless_framework::genesis;
+
+    const MAX_EXPIRATION_TIME_SECONDS_FOR_ORDERLESS_TXNS: u64 = 24 * 60 * 60; // 1 day
 
     /// This holds information that will be picked up by the VM to call the
     /// correct chain-specific prologue and epilogue functions
@@ -23,7 +27,7 @@ module endless_framework::transaction_validation {
         module_name: vector<u8>,
         script_prologue_name: vector<u8>,
         multi_agent_prologue_name: vector<u8>,
-        user_epilogue_name: vector<u8>,
+        user_epilogue_name: vector<u8>
     }
 
     /// MSB is used to indicate a gas payer tx
@@ -45,65 +49,110 @@ module endless_framework::transaction_validation {
     const PROLOGUE_ESEQUENCE_NUMBER_TOO_BIG: u64 = 1008;
     const PROLOGUE_ESECONDARY_KEYS_ADDRESSES_COUNT_MISMATCH: u64 = 1009;
     const PROLOGUE_EFEE_PAYER_NOT_ENABLED: u64 = 1010;
-
+    const PROLOGUE_EORDERLESS_TRANSACTIONS_NOT_ENABLED: u64 = 1011;
+    const PROLOGUE_ENONCE_ALREADY_USED: u64 = 1012;
+    const PROLOGUE_ETRANSACTION_EXPIRATION_TOO_FAR_IN_FUTURE: u64 = 1013;
 
     /// Only called during genesis to initialize system resources for this module.
     public(friend) fun initialize(
         endless_framework: &signer,
         script_prologue_name: vector<u8>,
         multi_agent_prologue_name: vector<u8>,
-        user_epilogue_name: vector<u8>,
+        user_epilogue_name: vector<u8>
     ) {
         system_addresses::assert_endless_framework(endless_framework);
 
-        move_to(endless_framework, TransactionValidation {
-            module_addr: @endless_framework,
-            module_name: b"transaction_validation",
-            script_prologue_name,
-            multi_agent_prologue_name,
-            user_epilogue_name,
-        });
+        move_to(
+            endless_framework,
+            TransactionValidation {
+                module_addr: @endless_framework,
+                module_name: b"transaction_validation",
+                script_prologue_name,
+                multi_agent_prologue_name,
+                user_epilogue_name
+            }
+        );
     }
 
     fun prologue_common(
         sender: signer,
         gas_payer: address,
         txn_sequence_number: u64,
+        txn_nonce: option::Option<u64>,
         txn_authentication_key: vector<vector<u8>>,
         txn_gas_price: u64,
         txn_max_gas_units: u64,
         txn_expiration_time: u64,
         chain_id: u8,
+        is_simulate: bool
     ) {
         assert!(
             timestamp::now_seconds() < txn_expiration_time,
-            error::invalid_argument(PROLOGUE_ETRANSACTION_EXPIRED),
+            error::invalid_argument(PROLOGUE_ETRANSACTION_EXPIRED)
         );
-        assert!(chain_id::get() == chain_id, error::invalid_argument(PROLOGUE_EBAD_CHAIN_ID));
+        assert!(
+            chain_id::get() == chain_id,
+            error::invalid_argument(PROLOGUE_EBAD_CHAIN_ID)
+        );
 
         let transaction_sender = signer::address_of(&sender);
 
         // Ensure the transaction sender is a valid account
-        assert!(!object::is_object(transaction_sender), error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST));
+        assert!(
+            !object::is_object(transaction_sender),
+            error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST)
+        );
 
-        if (
-            transaction_sender == gas_payer
-            || account::exists_at(transaction_sender)
-            || !features::sponsored_automatic_account_creation_enabled()
-            || txn_sequence_number > 0
-        ) {
-            assert!(account::exists_at(transaction_sender), error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST));
+        let sender_exists = account::exists_at(transaction_sender);
+
+        // Check auth key if not simulating
+        if (!is_simulate) {
+            if (sender_exists) {
+                assert!(
+                    account::check_authentication_key(
+                        transaction_sender, txn_authentication_key
+                    ),
+                    error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY)
+                );
+            } else {
+                assert!(
+                    vector::length(&txn_authentication_key) == 1,
+                    error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY)
+                );
+
+                assert!(
+                    *vector::borrow(&txn_authentication_key, 0)
+                        == bcs::to_bytes(&transaction_sender),
+                    error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY)
+                );
+            };
+        };
+
+        // Check txn nonce if it is provided, otherwise check sequence number
+        if (option::is_some(&txn_nonce)) {
+            let nonce = option::destroy_some(txn_nonce);
             assert!(
-                account::check_authentication_key(transaction_sender, txn_authentication_key),
-                error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY),
+                txn_expiration_time
+                    <= timestamp::now_seconds()
+                        + MAX_EXPIRATION_TIME_SECONDS_FOR_ORDERLESS_TXNS,
+                error::invalid_argument(
+                    PROLOGUE_ETRANSACTION_EXPIRATION_TOO_FAR_IN_FUTURE
+                )
             );
-
-            let account_sequence_number = account::get_sequence_number(transaction_sender);
+            assert!(
+                nonce_validation::check_nonce(
+                    transaction_sender, nonce, txn_expiration_time
+                ),
+                error::invalid_argument(PROLOGUE_ENONCE_ALREADY_USED)
+            );
+        } else {
+            let account_sequence_number =
+                if (sender_exists) account::get_sequence_number(transaction_sender)
+                else 0;
             assert!(
                 txn_sequence_number < (1u64 << 63),
                 error::out_of_range(PROLOGUE_ESEQUENCE_NUMBER_TOO_BIG)
             );
-
             assert!(
                 txn_sequence_number >= account_sequence_number,
                 error::invalid_argument(PROLOGUE_ESEQUENCE_NUMBER_TOO_OLD)
@@ -113,33 +162,18 @@ module endless_framework::transaction_validation {
                 txn_sequence_number == account_sequence_number,
                 error::invalid_argument(PROLOGUE_ESEQUENCE_NUMBER_TOO_NEW)
             );
-        } else {
-            // In this case, the transaction is sponsored and the account does not exist, so ensure
-            // the default values match.
-            assert!(
-                txn_sequence_number == 0,
-                error::invalid_argument(PROLOGUE_ESEQUENCE_NUMBER_TOO_NEW)
-            );
-
-            assert!(
-                vector::length(&txn_authentication_key) == 1,
-                error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY),
-            );
-
-            assert!(
-                *vector::borrow(&txn_authentication_key, 0) == bcs::to_bytes(&transaction_sender),
-                error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY),
-            );
         };
 
         let max_transaction_fee = txn_gas_price * txn_max_gas_units;
         assert!(
-            primary_fungible_store::primary_store_exists(gas_payer, endless_coin::get_metadata()),
-            error::invalid_argument(PROLOGUE_ECANT_PAY_GAS_DEPOSIT),
+            primary_fungible_store::primary_store_exists(
+                gas_payer, endless_coin::get_metadata()
+            ),
+            error::invalid_argument(PROLOGUE_ECANT_PAY_GAS_DEPOSIT)
         );
         assert!(
             endless_coin::check_minimum_balance(gas_payer, (max_transaction_fee as u128)),
-            error::invalid_argument(PROLOGUE_ECANT_PAY_GAS_DEPOSIT),
+            error::invalid_argument(PROLOGUE_ECANT_PAY_GAS_DEPOSIT)
         );
     }
 
@@ -151,10 +185,21 @@ module endless_framework::transaction_validation {
         txn_max_gas_units: u64,
         txn_expiration_time: u64,
         chain_id: u8,
-        _script_hash: vector<u8>,
+        _script_hash: vector<u8>
     ) {
         let gas_payer = signer::address_of(&sender);
-        prologue_common(sender, gas_payer, txn_sequence_number, txn_public_key, txn_gas_price, txn_max_gas_units, txn_expiration_time, chain_id)
+        prologue_common(
+            sender,
+            gas_payer,
+            txn_sequence_number,
+            option::none(),
+            txn_public_key,
+            txn_gas_price,
+            txn_max_gas_units,
+            txn_expiration_time,
+            chain_id,
+            false
+        )
     }
 
     fun multi_agent_script_prologue(
@@ -166,30 +211,35 @@ module endless_framework::transaction_validation {
         txn_gas_price: u64,
         txn_max_gas_units: u64,
         txn_expiration_time: u64,
-        chain_id: u8,
+        chain_id: u8
     ) {
         let sender_addr = signer::address_of(&sender);
         prologue_common(
             sender,
             sender_addr,
             txn_sequence_number,
+            option::none(),
             txn_sender_public_key,
             txn_gas_price,
             txn_max_gas_units,
             txn_expiration_time,
             chain_id,
+            false
         );
-        multi_agent_common_prologue(secondary_signer_addresses, secondary_signer_public_key_hashes);
+        multi_agent_common_prologue(
+            secondary_signer_addresses, secondary_signer_public_key_hashes
+        );
     }
 
     fun multi_agent_common_prologue(
         secondary_signer_addresses: vector<address>,
-        secondary_signer_public_key_hashes: vector<vector<vector<u8>>>,
+        secondary_signer_public_key_hashes: vector<vector<vector<u8>>>
     ) {
         let num_secondary_signers = vector::length(&secondary_signer_addresses);
         assert!(
-            vector::length(&secondary_signer_public_key_hashes) == num_secondary_signers,
-            error::invalid_argument(PROLOGUE_ESECONDARY_KEYS_ADDRESSES_COUNT_MISMATCH),
+            vector::length(&secondary_signer_public_key_hashes)
+                == num_secondary_signers,
+            error::invalid_argument(PROLOGUE_ESECONDARY_KEYS_ADDRESSES_COUNT_MISMATCH)
         );
 
         let i = 0;
@@ -198,22 +248,77 @@ module endless_framework::transaction_validation {
                 invariant i <= num_secondary_signers;
                 invariant forall j in 0..i:
                     account::exists_at(secondary_signer_addresses[j])
-                    && account::spec_check_authentication_key(
-                        secondary_signer_addresses[j],
-                        secondary_signer_public_key_hashes[j]);
+                        && account::spec_check_authentication_key(
+                            secondary_signer_addresses[j],
+                            secondary_signer_public_key_hashes[j]
+                        );
             };
             (i < num_secondary_signers)
         }) {
             let secondary_address = *vector::borrow(&secondary_signer_addresses, i);
-            assert!(account::exists_at(secondary_address), error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST));
-
-            let signer_public_key_hash = *vector::borrow(&secondary_signer_public_key_hashes, i);
             assert!(
-                account::check_authentication_key(secondary_address, signer_public_key_hash),
-                error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY),
+                account::exists_at(secondary_address),
+                error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST)
+            );
+
+            let signer_public_key_hash =
+                *vector::borrow(&secondary_signer_public_key_hashes, i);
+            assert!(
+                account::check_authentication_key(
+                    secondary_address, signer_public_key_hash
+                ),
+                error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY)
             );
             i = i + 1;
         }
+    }
+
+    fun prologue(
+        sender: signer,
+        fee_payer: address,
+        fee_payer_public_key_hash: vector<vector<u8>>,
+        txn_sequence_number: u64,
+        txn_nonce: option::Option<u64>,
+        txn_public_key: vector<vector<u8>>,
+        secondary_signer_addresses: vector<address>,
+        secondary_signer_public_key_hashes: vector<vector<vector<u8>>>,
+        txn_gas_price: u64,
+        txn_max_gas_units: u64,
+        txn_expiration_time: u64,
+        chain_id: u8,
+        is_simulate: bool
+    ) {
+        assert!(
+            features::fee_payer_enabled(),
+            error::invalid_state(PROLOGUE_EFEE_PAYER_NOT_ENABLED)
+        );
+        if (option::is_some(&txn_nonce)) {
+            assert!(
+                features::orderless_transactions_enabled(),
+                error::invalid_state(PROLOGUE_EORDERLESS_TRANSACTIONS_NOT_ENABLED)
+            );
+        };
+        prologue_common(
+            sender,
+            fee_payer,
+            txn_sequence_number,
+            txn_nonce,
+            txn_public_key,
+            txn_gas_price,
+            txn_max_gas_units,
+            txn_expiration_time,
+            chain_id,
+            is_simulate
+        );
+        multi_agent_common_prologue(
+            secondary_signer_addresses, secondary_signer_public_key_hashes
+        );
+        if (!vector::is_empty(&fee_payer_public_key_hash)) {
+            assert!(
+                account::check_authentication_key(fee_payer, fee_payer_public_key_hash),
+                error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY)
+            );
+        };
     }
 
     fun sponsored_script_prologue(
@@ -226,20 +331,27 @@ module endless_framework::transaction_validation {
         txn_gas_price: u64,
         txn_max_gas_units: u64,
         txn_expiration_time: u64,
-        chain_id: u8,
+        chain_id: u8
     ) {
-        assert!(features::fee_payer_enabled(), error::invalid_state(PROLOGUE_EFEE_PAYER_NOT_ENABLED));
+        assert!(
+            features::fee_payer_enabled(),
+            error::invalid_state(PROLOGUE_EFEE_PAYER_NOT_ENABLED)
+        );
         prologue_common(
             sender,
             fee_payer,
             txn_sequence_number,
+            option::none(),
             txn_public_key,
             txn_gas_price,
             txn_max_gas_units,
             txn_expiration_time,
             chain_id,
+            false
         );
-        multi_agent_common_prologue(secondary_signer_addresses, secondary_signer_public_key_hashes);
+        multi_agent_common_prologue(
+            secondary_signer_addresses, secondary_signer_public_key_hashes
+        );
     }
 
     fun fee_payer_script_prologue(
@@ -253,90 +365,57 @@ module endless_framework::transaction_validation {
         txn_gas_price: u64,
         txn_max_gas_units: u64,
         txn_expiration_time: u64,
-        chain_id: u8,
+        chain_id: u8
     ) {
-        assert!(features::fee_payer_enabled(), error::invalid_state(PROLOGUE_EFEE_PAYER_NOT_ENABLED));
+        assert!(
+            features::fee_payer_enabled(),
+            error::invalid_state(PROLOGUE_EFEE_PAYER_NOT_ENABLED)
+        );
         prologue_common(
             sender,
             fee_payer_address,
             txn_sequence_number,
+            option::none(),
             txn_sender_public_key,
             txn_gas_price,
             txn_max_gas_units,
             txn_expiration_time,
             chain_id,
+            false
         );
-        multi_agent_common_prologue(secondary_signer_addresses, secondary_signer_public_key_hashes);
+        multi_agent_common_prologue(
+            secondary_signer_addresses, secondary_signer_public_key_hashes
+        );
         assert!(
-            account::check_authentication_key(fee_payer_address, fee_payer_public_key_hash),
-            error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY),
+            account::check_authentication_key(
+                fee_payer_address, fee_payer_public_key_hash
+            ),
+            error::invalid_argument(PROLOGUE_EINVALID_ACCOUNT_AUTH_KEY)
         );
     }
 
     fun simulate_prologue(
-        sender: address,
+        sender: signer,
         gas_payer: address,
-        secondary_signer_addresses: vector<address>,
+        _secondary_signer_addresses: vector<address>,
         txn_sequence_number: u64,
         txn_gas_price: u64,
         txn_max_gas_units: u64,
         txn_expiration_time: u64,
-        chain_id: u8,
+        chain_id: u8
     ) {
-        assert!(
-            timestamp::now_seconds() < txn_expiration_time,
-            error::invalid_argument(PROLOGUE_ETRANSACTION_EXPIRED),
+        prologue_common(
+            sender,
+            gas_payer,
+            txn_sequence_number,
+            option::none(),
+            vector[],
+            txn_gas_price,
+            txn_max_gas_units,
+            txn_expiration_time,
+            chain_id,
+            true
         );
-        assert!(chain_id::get() == chain_id, error::invalid_argument(PROLOGUE_EBAD_CHAIN_ID));
-
-        // Ensure the transaction sender is a valid account
-        assert!(!object::is_object(sender), error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST));
-
-        if (
-            sender == gas_payer
-            || account::exists_at(sender)
-            || !features::sponsored_automatic_account_creation_enabled()
-            || txn_sequence_number > 0
-        ) {
-            assert!(account::exists_at(sender), error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST));
-
-            let account_sequence_number = account::get_sequence_number(sender);
-            assert!(
-                txn_sequence_number < (1u64 << 63),
-                error::out_of_range(PROLOGUE_ESEQUENCE_NUMBER_TOO_BIG)
-            );
-
-            assert!(
-                txn_sequence_number >= account_sequence_number,
-                error::invalid_argument(PROLOGUE_ESEQUENCE_NUMBER_TOO_OLD)
-            );
-
-            assert!(
-                txn_sequence_number == account_sequence_number,
-                error::invalid_argument(PROLOGUE_ESEQUENCE_NUMBER_TOO_NEW)
-            );
-        } else {
-            // In this case, the transaction is sponsored and the account does not exist, so ensure
-            // the default values match.
-            assert!(
-                txn_sequence_number == 0,
-                error::invalid_argument(PROLOGUE_ESEQUENCE_NUMBER_TOO_NEW)
-            );
-        };
-
-        let max_transaction_fee = txn_gas_price * txn_max_gas_units;
-        assert!(
-            primary_fungible_store::primary_store_exists(gas_payer, endless_coin::get_metadata()),
-            error::invalid_argument(PROLOGUE_ECANT_PAY_GAS_DEPOSIT),
-        );
-        assert!(
-            endless_coin::check_minimum_balance(gas_payer, (max_transaction_fee as u128)),
-            error::invalid_argument(PROLOGUE_ECANT_PAY_GAS_DEPOSIT),
-        );
-
-        vector::for_each_reverse(secondary_signer_addresses, |account| {
-            assert!(account::exists_at(account), error::invalid_argument(PROLOGUE_EACCOUNT_DOES_NOT_EXIST));
-        });
     }
 
     /// Epilogue function is run after a transaction is successfully executed.
@@ -350,7 +429,15 @@ module endless_framework::transaction_validation {
         gas_units_remaining: u64
     ) {
         let addr = signer::address_of(&account);
-        epilogue_gas_payer(account, addr, storage_fee, storage_fee_refunded, txn_gas_price, txn_max_gas_units, gas_units_remaining);
+        epilogue_gas_payer(
+            account,
+            addr,
+            storage_fee,
+            storage_fee_refunded,
+            txn_gas_price,
+            txn_max_gas_units,
+            gas_units_remaining
+        );
     }
 
     /// Epilogue function with explicit gas payer specified, is run after a transaction is successfully executed.
@@ -364,7 +451,10 @@ module endless_framework::transaction_validation {
         txn_max_gas_units: u64,
         gas_units_remaining: u64
     ) {
-        assert!(txn_max_gas_units >= gas_units_remaining, error::invalid_argument(EOUT_OF_GAS));
+        assert!(
+            txn_max_gas_units >= gas_units_remaining,
+            error::invalid_argument(EOUT_OF_GAS)
+        );
         let gas_used = txn_max_gas_units - gas_units_remaining;
 
         assert!(
@@ -383,8 +473,10 @@ module endless_framework::transaction_validation {
         // to do failed transaction cleanup.
         assert!(
             // skip check `features::collect_and_distribute_gas_fees()` to simplify
-            transaction_fee::collect_fee(gas_payer, transaction_fee_amount, (storage_fee as u128)),
-            error::out_of_range(PROLOGUE_ECANT_PAY_GAS_DEPOSIT),
+            transaction_fee::collect_fee(
+                gas_payer, transaction_fee_amount, (storage_fee as u128)
+            ),
+            error::out_of_range(PROLOGUE_ECANT_PAY_GAS_DEPOSIT)
         );
 
         if (storage_fee_refunded > 0) {
@@ -394,5 +486,30 @@ module endless_framework::transaction_validation {
         // Increment sequence number
         let addr = signer::address_of(&account);
         account::increment_sequence_number(addr);
+    }
+
+    fun orderless_epilogue(
+        account: signer,
+        txn_nonce: u64,
+        txn_expiration_time: u64,
+        gas_payer: address,
+        storage_fee: u64,
+        storage_fee_refunded: u64,
+        txn_gas_price: u64,
+        txn_max_gas_units: u64,
+        gas_units_remaining: u64
+    ) {
+        nonce_validation::insert_nonce(
+            signer::address_of(&account), txn_nonce, txn_expiration_time
+        );
+        epilogue_gas_payer(
+            account,
+            gas_payer,
+            storage_fee,
+            storage_fee_refunded,
+            txn_gas_price,
+            txn_max_gas_units,
+            gas_units_remaining
+        );
     }
 }

@@ -109,6 +109,10 @@ return true.
 -  [Function `reward_split_enabled`](#0x1_features_reward_split_enabled)
 -  [Function `get_eds_supply_inflation_feature`](#0x1_features_get_eds_supply_inflation_feature)
 -  [Function `eds_supply_inflation_enabled`](#0x1_features_eds_supply_inflation_enabled)
+-  [Function `get_default_account_resource_feature`](#0x1_features_get_default_account_resource_feature)
+-  [Function `default_account_resource_enbaled`](#0x1_features_default_account_resource_enbaled)
+-  [Function `get_orderless_transactions_feature`](#0x1_features_get_orderless_transactions_feature)
+-  [Function `orderless_transactions_enabled`](#0x1_features_orderless_transactions_enabled)
 -  [Function `change_feature_flags`](#0x1_features_change_feature_flags)
 -  [Function `change_feature_flags_for_next_epoch`](#0x1_features_change_feature_flags_for_next_epoch)
 -  [Function `on_new_epoch`](#0x1_features_on_new_epoch)
@@ -354,6 +358,16 @@ Lifetime: transient
 
 
 
+<a id="0x1_features_DEFAULT_ACCOUNT_RERSOURCE"></a>
+
+Whether orderless transactions is enabled
+
+
+<pre><code><b>const</b> <a href="features.md#0x1_features_DEFAULT_ACCOUNT_RERSOURCE">DEFAULT_ACCOUNT_RERSOURCE</a>: u64 = 59;
+</code></pre>
+
+
+
 <a id="0x1_features_DELEGATION_POOLS"></a>
 
 Whether delegation pools are enabled.
@@ -591,6 +605,16 @@ Lifetime: transient
 
 
 <pre><code><b>const</b> <a href="features.md#0x1_features_OPERATOR_BENEFICIARY_CHANGE">OPERATOR_BENEFICIARY_CHANGE</a>: u64 = 39;
+</code></pre>
+
+
+
+<a id="0x1_features_ORDERLESS_TRANSACTIONS"></a>
+
+Whether orderless transactions is enabled
+
+
+<pre><code><b>const</b> <a href="features.md#0x1_features_ORDERLESS_TRANSACTIONS">ORDERLESS_TRANSACTIONS</a>: u64 = 60;
 </code></pre>
 
 
@@ -2566,6 +2590,98 @@ Lifetime: transient
 
 <pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_eds_supply_inflation_enabled">eds_supply_inflation_enabled</a>(): bool <b>acquires</b> <a href="features.md#0x1_features_Features">Features</a> {
     <a href="features.md#0x1_features_is_enabled">is_enabled</a>(<a href="features.md#0x1_features_EDS_SUPPLY_INFLATION">EDS_SUPPLY_INFLATION</a>)
+}
+</code></pre>
+
+
+
+</details>
+
+<a id="0x1_features_get_default_account_resource_feature"></a>
+
+## Function `get_default_account_resource_feature`
+
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_get_default_account_resource_feature">get_default_account_resource_feature</a>(): u64
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_get_default_account_resource_feature">get_default_account_resource_feature</a>(): u64 { <a href="features.md#0x1_features_DEFAULT_ACCOUNT_RERSOURCE">DEFAULT_ACCOUNT_RERSOURCE</a> }
+</code></pre>
+
+
+
+</details>
+
+<a id="0x1_features_default_account_resource_enbaled"></a>
+
+## Function `default_account_resource_enbaled`
+
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_default_account_resource_enbaled">default_account_resource_enbaled</a>(): bool
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_default_account_resource_enbaled">default_account_resource_enbaled</a>(): bool <b>acquires</b> <a href="features.md#0x1_features_Features">Features</a> {
+    <a href="features.md#0x1_features_is_enabled">is_enabled</a>(<a href="features.md#0x1_features_DEFAULT_ACCOUNT_RERSOURCE">DEFAULT_ACCOUNT_RERSOURCE</a>)
+}
+</code></pre>
+
+
+
+</details>
+
+<a id="0x1_features_get_orderless_transactions_feature"></a>
+
+## Function `get_orderless_transactions_feature`
+
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_get_orderless_transactions_feature">get_orderless_transactions_feature</a>(): u64
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_get_orderless_transactions_feature">get_orderless_transactions_feature</a>(): u64 { <a href="features.md#0x1_features_ORDERLESS_TRANSACTIONS">ORDERLESS_TRANSACTIONS</a> }
+</code></pre>
+
+
+
+</details>
+
+<a id="0x1_features_orderless_transactions_enabled"></a>
+
+## Function `orderless_transactions_enabled`
+
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_orderless_transactions_enabled">orderless_transactions_enabled</a>(): bool
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="features.md#0x1_features_orderless_transactions_enabled">orderless_transactions_enabled</a>(): bool <b>acquires</b> <a href="features.md#0x1_features_Features">Features</a> {
+    <a href="features.md#0x1_features_is_enabled">is_enabled</a>(<a href="features.md#0x1_features_ORDERLESS_TRANSACTIONS">ORDERLESS_TRANSACTIONS</a>)
 }
 </code></pre>
 

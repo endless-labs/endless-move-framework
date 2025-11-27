@@ -23,7 +23,6 @@
 -  [Function `start_distribute_coins`](#0x1_locking_coin_ex_start_distribute_coins)
 -  [Function `distribut_coins_with_config`](#0x1_locking_coin_ex_distribut_coins_with_config)
 -  [Function `setup_pool_resource`](#0x1_locking_coin_ex_setup_pool_resource)
--  [Function `validate_config`](#0x1_locking_coin_ex_validate_config)
 -  [Function `add_locking_plan_for_address`](#0x1_locking_coin_ex_add_locking_plan_for_address)
 -  [Function `distribute_coins`](#0x1_locking_coin_ex_distribute_coins)
 -  [Function `add_locking_plan_from_unlocked_balance`](#0x1_locking_coin_ex_add_locking_plan_from_unlocked_balance)
@@ -88,7 +87,7 @@
 
 </dd>
 <dt>
-<code>first_unlock_bps: u64</code>
+<code>first_unlock_percent: u64</code>
 </dt>
 <dd>
 
@@ -396,15 +395,6 @@ admin has insufficient balance to disritute;
 
 
 <pre><code><b>const</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_AIRDROP">AIRDROP</a>: <b>address</b> = 0xbedaa6897c6dd3f016f112ce61340d1fe3271bd737607563ebc609fd6ebc879f;
-</code></pre>
-
-
-
-<a id="0x1_locking_coin_ex_BPS_10000"></a>
-
-
-
-<pre><code><b>const</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_BPS_10000">BPS_10000</a>: u64 = 10000;
 </code></pre>
 
 
@@ -887,35 +877,6 @@ Initialize StakingPool and move it to 0x1.
 
 </details>
 
-<a id="0x1_locking_coin_ex_validate_config"></a>
-
-## Function `validate_config`
-
-
-
-<pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_validate_config">validate_config</a>(c: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">locking_coin_ex::LockingConfig</a>)
-</code></pre>
-
-
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_validate_config">validate_config</a>(c: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a>) {
-    <b>assert</b>!(c.total_coins &gt; 0, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINVALID_DATA">EINVALID_DATA</a>);
-    <b>assert</b>!(c.first_unlock_bps &lt;= <a href="locking_coin_ex.md#0x1_locking_coin_ex_BPS_10000">BPS_10000</a>, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINVALID_DATA">EINVALID_DATA</a>);
-
-    <b>if</b> (c.stable_unlock_interval == 0 || c.stable_unlock_periods == 0) {
-        <b>assert</b>!(c.first_unlock_bps == <a href="locking_coin_ex.md#0x1_locking_coin_ex_BPS_10000">BPS_10000</a>, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINVALID_DATA">EINVALID_DATA</a>);
-    }
-}
-</code></pre>
-
-
-
-</details>
-
 <a id="0x1_locking_coin_ex_add_locking_plan_for_address"></a>
 
 ## Function `add_locking_plan_for_address`
@@ -940,7 +901,9 @@ else transfer from sponser account balance.
     from_unlocked: bool
 ) <b>acquires</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>, <a href="locking_coin_ex.md#0x1_locking_coin_ex_CapStore">CapStore</a> {
 
-    <a href="locking_coin_ex.md#0x1_locking_coin_ex_validate_config">validate_config</a>(&c);
+    <b>assert</b>!(c.total_coins &gt; 0, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINVALID_DATA">EINVALID_DATA</a>);
+    <b>assert</b>!(c.first_unlock_percent &lt;= 100, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINVALID_DATA">EINVALID_DATA</a>);
+    <b>assert</b>!(c.first_unlock_percent &lt;= 100, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINVALID_DATA">EINVALID_DATA</a>);
 
     <b>let</b> seed = <a href="../../endless-stdlib/../move-stdlib/doc/bcs.md#0x1_bcs_to_bytes">bcs::to_bytes</a>(&c.<b>address</b>);
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_append">vector::append</a>(&<b>mut</b> seed, <a href="locking_coin_ex.md#0x1_locking_coin_ex_CONTRACT_NAME">CONTRACT_NAME</a>);
@@ -969,7 +932,7 @@ else transfer from sponser account balance.
     <b>let</b> token_pools = &<b>mut</b> <b>borrow_global_mut</b>&lt;<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>&gt;(<a href="locking_coin_ex.md#0x1_locking_coin_ex_ADMINISTRATOR">ADMINISTRATOR</a>).token_pools;
 
     // If no token pool for token_address, it means token is a new one, it will create token_pool and add <b>to</b> token_pools <a href="../../endless-stdlib/doc/table.md#0x1_table">table</a>.
-    <b>if</b> (!<a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_contains">smart_table::contains</a>(token_pools, token_address)) {
+    <b>if</b>(!<a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_contains">smart_table::contains</a>(token_pools, token_address)) {
         <b>let</b> pool = <a href="locking_coin_ex.md#0x1_locking_coin_ex_TokenPool">TokenPool</a> {
             stakers: <a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_new">smart_table::new</a>(),
             total_locks: 0,
@@ -1025,7 +988,7 @@ Create resource account for each staker and mint coin to related resource accoun
 Send locking coin to another address from free amount and unlock by plan
 
 
-<pre><code><b>public</b> entry <b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_add_locking_plan_from_unlocked_balance">add_locking_plan_from_unlocked_balance</a>(sender: &<a href="../../endless-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>, token_address: <b>address</b>, reciever: <b>address</b>, total_coins: u128, first_unlock_bps: u64, first_unlock_epoch: u64, stable_unlock_interval: u64, stable_unlock_periods: u64)
+<pre><code><b>public</b> entry <b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_add_locking_plan_from_unlocked_balance">add_locking_plan_from_unlocked_balance</a>(sender: &<a href="../../endless-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>, token_address: <b>address</b>, reciever: <b>address</b>, total_coins: u128, first_unlock_percent: u64, first_unlock_epoch: u64, stable_unlock_interval: u64, stable_unlock_periods: u64)
 </code></pre>
 
 
@@ -1039,7 +1002,7 @@ Send locking coin to another address from free amount and unlock by plan
     token_address: <b>address</b>,
     reciever: <b>address</b>,
     total_coins: u128,
-    first_unlock_bps: u64,
+    first_unlock_percent: u64,
     first_unlock_epoch: u64,
     stable_unlock_interval: u64,
     stable_unlock_periods: u64,
@@ -1047,7 +1010,7 @@ Send locking coin to another address from free amount and unlock by plan
     <b>let</b> c = <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: reciever,
         total_coins,
-        first_unlock_bps,
+        first_unlock_percent,
         first_unlock_epoch,
         stable_unlock_interval,
         stable_unlock_periods
@@ -1067,7 +1030,7 @@ Send locking coin to another address from free amount and unlock by plan
 
 
 
-<pre><code><b>public</b> entry <b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_add_locking_plan">add_locking_plan</a>(sender: &<a href="../../endless-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>, token_address: <b>address</b>, reciever: <b>address</b>, total_coins: u128, first_unlock_bps: u64, first_unlock_epoch: u64, stable_unlock_interval: u64, stable_unlock_periods: u64)
+<pre><code><b>public</b> entry <b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_add_locking_plan">add_locking_plan</a>(sender: &<a href="../../endless-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>, token_address: <b>address</b>, reciever: <b>address</b>, total_coins: u128, first_unlock_percent: u64, first_unlock_epoch: u64, stable_unlock_interval: u64, stable_unlock_periods: u64)
 </code></pre>
 
 
@@ -1081,7 +1044,7 @@ Send locking coin to another address from free amount and unlock by plan
     token_address: <b>address</b>,
     reciever: <b>address</b>,
     total_coins: u128,
-    first_unlock_bps: u64,
+    first_unlock_percent: u64,
     first_unlock_epoch: u64,
     stable_unlock_interval: u64,
     stable_unlock_periods: u64,
@@ -1089,7 +1052,7 @@ Send locking coin to another address from free amount and unlock by plan
     <b>let</b> c = <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: reciever,
         total_coins,
-        first_unlock_bps,
+        first_unlock_percent,
         first_unlock_epoch,
         stable_unlock_interval,
         stable_unlock_periods
@@ -1150,10 +1113,7 @@ Claim coins when recipient has free amount.
     recipient: <b>address</b>,
     amount: u128
 ): u128 <b>acquires</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>, <a href="locking_coin_ex.md#0x1_locking_coin_ex_CapStore">CapStore</a> {
-    <b>let</b> pool = <a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_borrow_mut">smart_table::borrow_mut</a>(
-        &<b>mut</b> <b>borrow_global_mut</b>&lt;<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>&gt;(<a href="locking_coin_ex.md#0x1_locking_coin_ex_ADMINISTRATOR">ADMINISTRATOR</a>).token_pools,
-        token_address
-    );
+    <b>let</b> pool = <a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_borrow_mut">smart_table::borrow_mut</a>(&<b>mut</b> <b>borrow_global_mut</b>&lt;<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>&gt;(<a href="locking_coin_ex.md#0x1_locking_coin_ex_ADMINISTRATOR">ADMINISTRATOR</a>).token_pools, token_address);
     <b>let</b> stakers = &<b>mut</b> pool.stakers;
     <b>assert</b>!(<a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_contains">smart_table::contains</a>(stakers, address_of(sponser)), <a href="locking_coin_ex.md#0x1_locking_coin_ex_ENOT_STAKER">ENOT_STAKER</a>);
 
@@ -1162,8 +1122,6 @@ Claim coins when recipient has free amount.
     <b>if</b> (staker.curr_balance &lt;= locked) {
         <b>return</b> 0
     };
-
-    <b>assert</b>!(staker.curr_balance &gt;= locked + amount, <a href="locking_coin_ex.md#0x1_locking_coin_ex_EINSUFFICIENT_BALANCE">EINSUFFICIENT_BALANCE</a>);
 
     // Transfer unlocked coins <b>to</b> recipient.
     <b>let</b> free_amount = staker.curr_balance - locked;
@@ -1261,17 +1219,14 @@ Only user in locking pool allow to call.
 <pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_next_unlock">calc_next_unlock</a>(c: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a>, now_epoch: u64): u128 {
     <b>if</b> (now_epoch &lt;= c.first_unlock_epoch) {
         <b>return</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_init_unlock">calc_init_unlock</a>(c)
+    };
+
+
+    <b>let</b> period = (now_epoch - c.first_unlock_epoch) / c.stable_unlock_interval;
+    <b>if</b> (period &lt;= c.stable_unlock_periods) {
+        <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_stable_unlock">calc_stable_unlock</a>(c)
     } <b>else</b> {
-        <b>if</b> (c.stable_unlock_interval == 0) {
-            0
-        } <b>else</b> {
-            <b>let</b> period = (now_epoch - c.first_unlock_epoch) / c.stable_unlock_interval;
-            <b>if</b> (period &lt;= c.stable_unlock_periods) {
-                <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_stable_unlock">calc_stable_unlock</a>(c)
-            } <b>else</b> {
-                0
-            }
-        }
+        0
     }
 }
 </code></pre>
@@ -1287,7 +1242,7 @@ Only user in locking pool allow to call.
 Unlock amount each stable unlock epoch.
 
 
-<pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_stable_unlock">calc_stable_unlock</a>(c: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">locking_coin_ex::LockingConfig</a>): u128
+<pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_stable_unlock">calc_stable_unlock</a>(config: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">locking_coin_ex::LockingConfig</a>): u128
 </code></pre>
 
 
@@ -1296,12 +1251,12 @@ Unlock amount each stable unlock epoch.
 <summary>Implementation</summary>
 
 
-<pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_stable_unlock">calc_stable_unlock</a>(c: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a>): u128 {
-    <b>if</b> (c.stable_unlock_periods == 0) {
+<pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_stable_unlock">calc_stable_unlock</a>(config: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a>): u128 {
+    <b>if</b> (config.stable_unlock_interval == 0 || config.stable_unlock_interval == 0) {
         0
     } <b>else</b> {
-        (c.total_coins - <a href="../../endless-stdlib/doc/math128.md#0x1_math128_mul_div">math128::mul_div</a>(c.total_coins, (c.first_unlock_bps <b>as</b> u128), (<a href="locking_coin_ex.md#0x1_locking_coin_ex_BPS_10000">BPS_10000</a> <b>as</b> u128)))
-            / (c.stable_unlock_periods <b>as</b> u128)
+        (config.total_coins - <a href="../../endless-stdlib/doc/math128.md#0x1_math128_mul_div">math128::mul_div</a>(config.total_coins, (config.first_unlock_percent <b>as</b> u128), 100_u128))
+            / (config.stable_unlock_periods <b>as</b> u128)
     }
 }
 </code></pre>
@@ -1331,7 +1286,8 @@ Unlock amount each stable unlock epoch.
         <b>return</b> config.total_coins
     };
 
-    <b>if</b> (config.stable_unlock_interval == 0 || config.stable_unlock_periods == 0) {
+
+    <b>if</b> (config.stable_unlock_interval == 0 || config.stable_unlock_interval == 0) {
         <b>if</b> (current &lt; config.first_unlock_epoch) {
             config.total_coins
         } <b>else</b> {
@@ -1375,7 +1331,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_PE0">PE0</a>,
         total_coins: 11_00000000_00000000,
-        first_unlock_bps: 100,
+        first_unlock_percent: 100,
         first_unlock_epoch: 5,
         stable_unlock_interval: 2,
         stable_unlock_periods: 2
@@ -1384,7 +1340,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_PE1">PE1</a>,
         total_coins: 5_00000000_00000000,
-        first_unlock_bps: 10,
+        first_unlock_percent: 10,
         first_unlock_epoch: 5,
         stable_unlock_interval: 17,
         stable_unlock_periods: 3
@@ -1393,7 +1349,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_PE2">PE2</a>,
         total_coins: 3_00000000_00000000,
-        first_unlock_bps: 0,
+        first_unlock_percent: 0,
         first_unlock_epoch: 6,
         stable_unlock_interval: 17,
         stable_unlock_periods: 3
@@ -1402,7 +1358,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_PE3">PE3</a>,
         total_coins: 97000000_00000000,
-        first_unlock_bps: 0,
+        first_unlock_percent: 0,
         first_unlock_epoch: 8,
         stable_unlock_interval: 17,
         stable_unlock_periods: 3
@@ -1411,7 +1367,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_TEAM">TEAM</a>,
         total_coins: 15_03000000_00000000,
-        first_unlock_bps: 10,
+        first_unlock_percent: 10,
         first_unlock_epoch: 5,
         stable_unlock_interval: 17,
         stable_unlock_periods: 3
@@ -1420,7 +1376,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_FOUNDATION">FOUNDATION</a>,
         total_coins: 20_00000000_00000000,
-        first_unlock_bps: 10,
+        first_unlock_percent: 10,
         first_unlock_epoch: 5,
         stable_unlock_interval: 7,
         stable_unlock_periods: 11
@@ -1429,7 +1385,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_MARKET_PARTNERS">MARKET_PARTNERS</a>,
         total_coins: 8_90000000_00000000,
-        first_unlock_bps: 20,
+        first_unlock_percent: 20,
         first_unlock_epoch: 5,
         stable_unlock_interval: 2,
         stable_unlock_periods: 39
@@ -1438,7 +1394,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_AIRDROP">AIRDROP</a>,
         total_coins: 3_10000000_00000000,
-        first_unlock_bps: 20,
+        first_unlock_percent: 20,
         first_unlock_epoch: 5,
         stable_unlock_interval: 6,
         stable_unlock_periods: 5
@@ -1447,7 +1403,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_ECOLOGY">ECOLOGY</a>,
         total_coins: 18_30000000_00000000,
-        first_unlock_bps: 20,
+        first_unlock_percent: 20,
         first_unlock_epoch: 5,
         stable_unlock_interval: 10,
         stable_unlock_periods: 7
@@ -1456,7 +1412,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_COMMUNITY">COMMUNITY</a>,
         total_coins: 3_05000000_00000000,
-        first_unlock_bps: 20,
+        first_unlock_percent: 20,
         first_unlock_epoch: 5,
         stable_unlock_interval: 6,
         stable_unlock_periods: 9
@@ -1465,7 +1421,7 @@ Unlock amount each stable unlock epoch.
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_push_back">vector::push_back</a>(&<b>mut</b> locking_config, <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> {
         <b>address</b>: <a href="locking_coin_ex.md#0x1_locking_coin_ex_SKAKINGS">SKAKINGS</a>,
         total_coins: 10_15000000_00000000,
-        first_unlock_bps: 100,
+        first_unlock_percent: 100,
         first_unlock_epoch: 5,
         stable_unlock_interval: 2,
         stable_unlock_periods: 2
@@ -1495,6 +1451,7 @@ Unlock amount each stable unlock epoch.
 
 
 <pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_start_distribut_coins_test">start_distribut_coins_test</a>(endless_framework: &<a href="../../endless-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>) <b>acquires</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>, <a href="locking_coin_ex.md#0x1_locking_coin_ex_CapStore">CapStore</a> {
+
     <a href="../../endless-stdlib/../move-stdlib/doc/vector.md#0x1_vector_for_each_ref">vector::for_each_ref</a>(&<a href="locking_coin_ex.md#0x1_locking_coin_ex_locking_config">locking_config</a>(), |c| {
         <b>let</b> c: &<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingConfig">LockingConfig</a> = c;
         <a href="endless_coin.md#0x1_endless_coin_mint">endless_coin::mint</a>(endless_framework, c.<b>address</b>, c.total_coins);
@@ -1524,10 +1481,7 @@ Unlock amount each stable unlock epoch.
 
 
 <pre><code><b>fun</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_get_addr_free_amount">get_addr_free_amount</a>(user: <b>address</b>): u128 <b>acquires</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a> {
-    <b>let</b> pool = <a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_borrow">smart_table::borrow</a>(
-        &<b>borrow_global</b>&lt;<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>&gt;(<a href="locking_coin_ex.md#0x1_locking_coin_ex_ADMINISTRATOR">ADMINISTRATOR</a>).token_pools,
-        get_eds_token_address()
-    );
+    <b>let</b> pool = <a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_borrow">smart_table::borrow</a>(&<b>borrow_global</b>&lt;<a href="locking_coin_ex.md#0x1_locking_coin_ex_LockingSystem">LockingSystem</a>&gt;(<a href="locking_coin_ex.md#0x1_locking_coin_ex_ADMINISTRATOR">ADMINISTRATOR</a>).token_pools, get_eds_token_address());
 
     <b>let</b> staker = <a href="../../endless-stdlib/doc/smart_table.md#0x1_smart_table_borrow">smart_table::borrow</a>(&pool.stakers, user);
     staker.curr_balance - <a href="locking_coin_ex.md#0x1_locking_coin_ex_calc_still_locked_amount">calc_still_locked_amount</a>(&staker.config)

@@ -20,8 +20,6 @@ module endless_framework::locking_coin_ex {
 
     const ADMINISTRATOR: address = @endless_framework;
 
-    const BPS_10000: u64 = 10000;
-
     const CONTRACT_NAME: vector<u8> = b"locking_coin_ex";
 
     /// No locked coins found to claim.
@@ -48,12 +46,13 @@ module endless_framework::locking_coin_ex {
 
     const ETESER_FAILED: u64 = 20;
 
+    // TODO add coin type arg
     struct LockingConfig has store, drop, copy {
         address: address,
 
         total_coins: u128,
 
-        first_unlock_bps: u64,
+        first_unlock_percent: u64,
 
         first_unlock_epoch: u64,
 
@@ -219,15 +218,6 @@ module endless_framework::locking_coin_ex {
         })
     }
 
-    fun validate_config(c: &LockingConfig) {
-        assert!(c.total_coins > 0, EINVALID_DATA);
-        assert!(c.first_unlock_bps <= BPS_10000, EINVALID_DATA);
-
-        if (c.stable_unlock_interval == 0 || c.stable_unlock_periods == 0) {
-            assert!(c.first_unlock_bps == BPS_10000, EINVALID_DATA);
-        }
-    }
-
     /// If from_unlocked is true and it will transfer coin from sponser unlocked amount to repicient staking resource address,
     /// else transfer from sponser account balance.
     fun add_locking_plan_for_address(
@@ -237,7 +227,9 @@ module endless_framework::locking_coin_ex {
         from_unlocked: bool
     ) acquires LockingSystem, CapStore {
 
-        validate_config(&c);
+        assert!(c.total_coins > 0, EINVALID_DATA);
+        assert!(c.first_unlock_percent <= 100, EINVALID_DATA);
+        assert!(c.first_unlock_percent <= 100, EINVALID_DATA);
 
         let seed = bcs::to_bytes(&c.address);
         vector::append(&mut seed, CONTRACT_NAME);
@@ -266,7 +258,7 @@ module endless_framework::locking_coin_ex {
         let token_pools = &mut borrow_global_mut<LockingSystem>(ADMINISTRATOR).token_pools;
 
         // If no token pool for token_address, it means token is a new one, it will create token_pool and add to token_pools table.
-        if (!smart_table::contains(token_pools, token_address)) {
+        if(!smart_table::contains(token_pools, token_address)) {
             let pool = TokenPool {
                 stakers: smart_table::new(),
                 total_locks: 0,
@@ -296,7 +288,7 @@ module endless_framework::locking_coin_ex {
         token_address: address,
         reciever: address,
         total_coins: u128,
-        first_unlock_bps: u64,
+        first_unlock_percent: u64,
         first_unlock_epoch: u64,
         stable_unlock_interval: u64,
         stable_unlock_periods: u64,
@@ -304,7 +296,7 @@ module endless_framework::locking_coin_ex {
         let c = LockingConfig {
             address: reciever,
             total_coins,
-            first_unlock_bps,
+            first_unlock_percent,
             first_unlock_epoch,
             stable_unlock_interval,
             stable_unlock_periods
@@ -318,7 +310,7 @@ module endless_framework::locking_coin_ex {
         token_address: address,
         reciever: address,
         total_coins: u128,
-        first_unlock_bps: u64,
+        first_unlock_percent: u64,
         first_unlock_epoch: u64,
         stable_unlock_interval: u64,
         stable_unlock_periods: u64,
@@ -326,7 +318,7 @@ module endless_framework::locking_coin_ex {
         let c = LockingConfig {
             address: reciever,
             total_coins,
-            first_unlock_bps,
+            first_unlock_percent,
             first_unlock_epoch,
             stable_unlock_interval,
             stable_unlock_periods
@@ -347,10 +339,7 @@ module endless_framework::locking_coin_ex {
         recipient: address,
         amount: u128
     ): u128 acquires LockingSystem, CapStore {
-        let pool = smart_table::borrow_mut(
-            &mut borrow_global_mut<LockingSystem>(ADMINISTRATOR).token_pools,
-            token_address
-        );
+        let pool = smart_table::borrow_mut(&mut borrow_global_mut<LockingSystem>(ADMINISTRATOR).token_pools, token_address);
         let stakers = &mut pool.stakers;
         assert!(smart_table::contains(stakers, address_of(sponser)), ENOT_STAKER);
 
@@ -359,8 +348,6 @@ module endless_framework::locking_coin_ex {
         if (staker.curr_balance <= locked) {
             return 0
         };
-
-        assert!(staker.curr_balance >= locked + amount, EINSUFFICIENT_BALANCE);
 
         // Transfer unlocked coins to recipient.
         let free_amount = staker.curr_balance - locked;
@@ -399,27 +386,24 @@ module endless_framework::locking_coin_ex {
     fun calc_next_unlock(c: &LockingConfig, now_epoch: u64): u128 {
         if (now_epoch <= c.first_unlock_epoch) {
             return calc_init_unlock(c)
+        };
+
+
+        let period = (now_epoch - c.first_unlock_epoch) / c.stable_unlock_interval;
+        if (period <= c.stable_unlock_periods) {
+            calc_stable_unlock(c)
         } else {
-            if (c.stable_unlock_interval == 0) {
-                0
-            } else {
-                let period = (now_epoch - c.first_unlock_epoch) / c.stable_unlock_interval;
-                if (period <= c.stable_unlock_periods) {
-                    calc_stable_unlock(c)
-                } else {
-                    0
-                }
-            }
+            0
         }
     }
 
     /// Unlock amount each stable unlock epoch.
-    fun calc_stable_unlock(c: &LockingConfig): u128 {
-        if (c.stable_unlock_periods == 0) {
+    fun calc_stable_unlock(config: &LockingConfig): u128 {
+        if (config.stable_unlock_interval == 0 || config.stable_unlock_interval == 0) {
             0
         } else {
-            (c.total_coins - math128::mul_div(c.total_coins, (c.first_unlock_bps as u128), (BPS_10000 as u128)))
-                / (c.stable_unlock_periods as u128)
+            (config.total_coins - math128::mul_div(config.total_coins, (config.first_unlock_percent as u128), 100_u128))
+                / (config.stable_unlock_periods as u128)
         }
     }
 
@@ -430,7 +414,8 @@ module endless_framework::locking_coin_ex {
             return config.total_coins
         };
 
-        if (config.stable_unlock_interval == 0 || config.stable_unlock_periods == 0) {
+
+        if (config.stable_unlock_interval == 0 || config.stable_unlock_interval == 0) {
             if (current < config.first_unlock_epoch) {
                 config.total_coins
             } else {
@@ -472,7 +457,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: PE0,
             total_coins: 11_00000000_00000000,
-            first_unlock_bps: 100,
+            first_unlock_percent: 100,
             first_unlock_epoch: 5,
             stable_unlock_interval: 2,
             stable_unlock_periods: 2
@@ -481,7 +466,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: PE1,
             total_coins: 5_00000000_00000000,
-            first_unlock_bps: 10,
+            first_unlock_percent: 10,
             first_unlock_epoch: 5,
             stable_unlock_interval: 17,
             stable_unlock_periods: 3
@@ -490,7 +475,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: PE2,
             total_coins: 3_00000000_00000000,
-            first_unlock_bps: 0,
+            first_unlock_percent: 0,
             first_unlock_epoch: 6,
             stable_unlock_interval: 17,
             stable_unlock_periods: 3
@@ -499,7 +484,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: PE3,
             total_coins: 97000000_00000000,
-            first_unlock_bps: 0,
+            first_unlock_percent: 0,
             first_unlock_epoch: 8,
             stable_unlock_interval: 17,
             stable_unlock_periods: 3
@@ -508,7 +493,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: TEAM,
             total_coins: 15_03000000_00000000,
-            first_unlock_bps: 10,
+            first_unlock_percent: 10,
             first_unlock_epoch: 5,
             stable_unlock_interval: 17,
             stable_unlock_periods: 3
@@ -517,7 +502,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: FOUNDATION,
             total_coins: 20_00000000_00000000,
-            first_unlock_bps: 10,
+            first_unlock_percent: 10,
             first_unlock_epoch: 5,
             stable_unlock_interval: 7,
             stable_unlock_periods: 11
@@ -526,7 +511,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: MARKET_PARTNERS,
             total_coins: 8_90000000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 5,
             stable_unlock_interval: 2,
             stable_unlock_periods: 39
@@ -535,7 +520,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: AIRDROP,
             total_coins: 3_10000000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 5,
             stable_unlock_interval: 6,
             stable_unlock_periods: 5
@@ -544,7 +529,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: ECOLOGY,
             total_coins: 18_30000000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 5,
             stable_unlock_interval: 10,
             stable_unlock_periods: 7
@@ -553,7 +538,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: COMMUNITY,
             total_coins: 3_05000000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 5,
             stable_unlock_interval: 6,
             stable_unlock_periods: 9
@@ -562,7 +547,7 @@ module endless_framework::locking_coin_ex {
         vector::push_back(&mut locking_config, LockingConfig {
             address: SKAKINGS,
             total_coins: 10_15000000_00000000,
-            first_unlock_bps: 100,
+            first_unlock_percent: 100,
             first_unlock_epoch: 5,
             stable_unlock_interval: 2,
             stable_unlock_periods: 2
@@ -589,6 +574,7 @@ module endless_framework::locking_coin_ex {
     }
 
     public(friend) fun start_distribut_coins_test(endless_framework: &signer) acquires LockingSystem, CapStore {
+
         vector::for_each_ref(&locking_config(), |c| {
             let c: &LockingConfig = c;
             endless_coin::mint(endless_framework, c.address, c.total_coins);
@@ -644,11 +630,7 @@ module endless_framework::locking_coin_ex {
             let c: &LockingConfig = c;
 
             assert!(
-                do_claim(
-                    get_eds_token_address(),
-                    &create_signer(c.address),
-                    get_unlock_info(get_eds_token_address(), c.address).unlocked
-                ) == 0,
+                do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info( get_eds_token_address(), c.address).unlocked) == 0,
                 ETESER_FAILED
             );
         });
@@ -662,11 +644,7 @@ module endless_framework::locking_coin_ex {
         vector::for_each_ref(&locking_config(), |c| {
             let c: &LockingConfig = c;
             reconfiguration::update_epoch_for_test_custom(c.first_unlock_epoch + 1);
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
             assert!(
                 balance(c.address) == calc_next_unlock(c, reconfiguration::current_epoch() - 2),
                 ETESER_FAILED
@@ -682,17 +660,9 @@ module endless_framework::locking_coin_ex {
         vector::for_each_ref(&locking_config(), |c| {
             let c: &LockingConfig = c;
             reconfiguration::update_epoch_for_test_custom(c.first_unlock_epoch + 1);
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
             assert!(
-                do_claim(
-                    get_eds_token_address(),
-                    &create_signer(c.address),
-                    get_unlock_info(get_eds_token_address(), c.address).unlocked
-                ) == 0,
+                do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked) == 0,
                 ETESER_FAILED
             );
         });
@@ -710,11 +680,7 @@ module endless_framework::locking_coin_ex {
             reconfiguration::update_epoch_for_test_custom(
                 c.first_unlock_epoch + c.stable_unlock_periods * c.stable_unlock_interval - 1
             );
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
             let bls = balance(c.address);
             assert!(bls == c.total_coins - calc_stable_unlock(c), ETESER_FAILED);
         });
@@ -722,10 +688,7 @@ module endless_framework::locking_coin_ex {
 
 
     fun get_addr_free_amount(user: address): u128 acquires LockingSystem {
-        let pool = smart_table::borrow(
-            &borrow_global<LockingSystem>(ADMINISTRATOR).token_pools,
-            get_eds_token_address()
-        );
+        let pool = smart_table::borrow(&borrow_global<LockingSystem>(ADMINISTRATOR).token_pools, get_eds_token_address());
 
         let staker = smart_table::borrow(&pool.stakers, user);
         staker.curr_balance - calc_still_locked_amount(&staker.config)
@@ -736,11 +699,7 @@ module endless_framework::locking_coin_ex {
         vector::for_each_ref(&locking_config(), |c| {
             let c: &LockingConfig = c;
             if (get_addr_free_amount(c.address) > 0) {
-                do_claim(
-                    get_eds_token_address(),
-                    &create_signer(c.address),
-                    get_unlock_info(get_eds_token_address(), c.address).unlocked
-                );
+                do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
             }
         });
     }
@@ -754,11 +713,7 @@ module endless_framework::locking_coin_ex {
         vector::for_each_ref(&locking_config(), |c| {
             let c: &LockingConfig = c;
             reconfiguration::update_epoch_for_test_custom(c.first_unlock_epoch + 1);
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
             for (period in 1..(c.stable_unlock_periods + 1)) {
                 // first unlock
@@ -766,11 +721,7 @@ module endless_framework::locking_coin_ex {
                     c.first_unlock_epoch + period * c.stable_unlock_interval + 1
                 );
 
-                do_claim(
-                    get_eds_token_address(),
-                    &create_signer(c.address),
-                    get_unlock_info(get_eds_token_address(), c.address).unlocked
-                );
+                do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
 
                 let free = calc_next_unlock(c, 0) + calc_stable_unlock(c) * (period as u128);
@@ -791,11 +742,7 @@ module endless_framework::locking_coin_ex {
             reconfiguration::update_epoch_for_test_custom(
                 c.first_unlock_epoch + c.stable_unlock_periods * c.stable_unlock_interval + 1
             );
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
             assert!(balance(c.address) == c.total_coins, ETESER_FAILED);
         });
     }
@@ -808,7 +755,7 @@ module endless_framework::locking_coin_ex {
         let c = LockingConfig {
             address: address_of(tester),
             total_coins: 1000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 10,
             stable_unlock_interval: 3,
             stable_unlock_periods: 6,
@@ -819,18 +766,14 @@ module endless_framework::locking_coin_ex {
             get_eds_token_address(),
             address_of(tester),
             c.total_coins,
-            c.first_unlock_bps,
+            c.first_unlock_percent,
             c.first_unlock_epoch,
             c.stable_unlock_interval,
             c.stable_unlock_periods
         );
 
         reconfiguration::update_epoch_for_test_custom(c.first_unlock_epoch + 1);
-        do_claim(
-            get_eds_token_address(),
-            &create_signer(c.address),
-            get_unlock_info(get_eds_token_address(), c.address).unlocked
-        );
+        do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
         for (period in 1..(c.stable_unlock_periods + 1)) {
             // first unlock
@@ -838,11 +781,7 @@ module endless_framework::locking_coin_ex {
                 c.first_unlock_epoch + period * c.stable_unlock_interval + 1
             );
 
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
 
             let free = calc_next_unlock(&c, 0) + calc_stable_unlock(&c) * (period as u128);
@@ -860,7 +799,7 @@ module endless_framework::locking_coin_ex {
         let c = LockingConfig {
             address: address_of(tester),
             total_coins: 1000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 5,
             stable_unlock_interval: 3,
             stable_unlock_periods: 6,
@@ -869,11 +808,7 @@ module endless_framework::locking_coin_ex {
         add_locking_plan_for_address(tester, get_eds_token_address(), c, false);
 
         reconfiguration::update_epoch_for_test_custom(c.first_unlock_epoch + 1);
-        do_claim(
-            get_eds_token_address(),
-            &create_signer(c.address),
-            get_unlock_info(get_eds_token_address(), c.address).unlocked
-        );
+        do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
         for (period in 1..(c.stable_unlock_periods + 1)) {
             // first unlock
@@ -881,11 +816,7 @@ module endless_framework::locking_coin_ex {
                 c.first_unlock_epoch + period * c.stable_unlock_interval + 1
             );
 
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
 
             let free = calc_next_unlock(&c, 0) + calc_stable_unlock(&c) * (period as u128);
@@ -907,7 +838,7 @@ module endless_framework::locking_coin_ex {
         let c = LockingConfig {
             address: address_of(tester),
             total_coins: 1000_00000000,
-            first_unlock_bps: 20,
+            first_unlock_percent: 20,
             first_unlock_epoch: 100,
             stable_unlock_interval: 3,
             stable_unlock_periods: 6,
@@ -916,11 +847,7 @@ module endless_framework::locking_coin_ex {
         add_locking_plan_for_address(pe0, get_eds_token_address(), c, true);
 
         reconfiguration::update_epoch_for_test_custom(c.first_unlock_epoch + 1);
-        do_claim(
-            get_eds_token_address(),
-            &create_signer(c.address),
-            get_unlock_info(get_eds_token_address(), c.address).unlocked
-        );
+        do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
         for (period in 1..(c.stable_unlock_periods + 1)) {
             // first unlock
@@ -928,11 +855,7 @@ module endless_framework::locking_coin_ex {
                 c.first_unlock_epoch + period * c.stable_unlock_interval + 1
             );
 
-            do_claim(
-                get_eds_token_address(),
-                &create_signer(c.address),
-                get_unlock_info(get_eds_token_address(), c.address).unlocked
-            );
+            do_claim(get_eds_token_address() , &create_signer(c.address), get_unlock_info(get_eds_token_address(), c.address).unlocked);
 
 
             let free = calc_next_unlock(&c, 0) + calc_stable_unlock(&c) * (period as u128);

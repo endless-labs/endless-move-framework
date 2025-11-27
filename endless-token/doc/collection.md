@@ -50,7 +50,6 @@ require adding the field original_name.
 -  [Function `check_collection_exists`](#0x4_collection_check_collection_exists)
 -  [Function `borrow`](#0x4_collection_borrow)
 -  [Function `count`](#0x4_collection_count)
--  [Function `max_supply`](#0x4_collection_max_supply)
 -  [Function `creator`](#0x4_collection_creator)
 -  [Function `description`](#0x4_collection_description)
 -  [Function `name`](#0x4_collection_name)
@@ -877,8 +876,8 @@ TODO: Hide this until we bring back meaningful way to enforce burns
         <a href="royalty.md#0x4_royalty_init">royalty::init</a>(&constructor_ref, <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_extract">option::extract</a>(&<b>mut</b> <a href="royalty.md#0x4_royalty">royalty</a>))
     };
 
-    // <b>let</b> transfer_ref = <a href="../../endless-framework/doc/object.md#0x1_object_generate_transfer_ref">object::generate_transfer_ref</a>(&constructor_ref);
-    // <a href="../../endless-framework/doc/object.md#0x1_object_disable_ungated_transfer">object::disable_ungated_transfer</a>(&transfer_ref);
+    <b>let</b> transfer_ref = <a href="../../endless-framework/doc/object.md#0x1_object_generate_transfer_ref">object::generate_transfer_ref</a>(&constructor_ref);
+    <a href="../../endless-framework/doc/object.md#0x1_object_disable_ungated_transfer">object::disable_ungated_transfer</a>(&transfer_ref);
 
     constructor_ref
 }
@@ -1307,42 +1306,6 @@ it from being parallelized.
     } <b>else</b> <b>if</b> (<b>exists</b>&lt;<a href="collection.md#0x4_collection_UnlimitedSupply">UnlimitedSupply</a>&gt;(collection_address)) {
         <b>let</b> supply = <b>borrow_global_mut</b>&lt;<a href="collection.md#0x4_collection_UnlimitedSupply">UnlimitedSupply</a>&gt;(collection_address);
         <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_some">option::some</a>(supply.current_supply)
-    } <b>else</b> {
-        <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_none">option::none</a>()
-    }
-}
-</code></pre>
-
-
-
-</details>
-
-<a id="0x4_collection_max_supply"></a>
-
-## Function `max_supply`
-
-
-
-<pre><code>#[view]
-<b>public</b> <b>fun</b> <a href="collection.md#0x4_collection_max_supply">max_supply</a>&lt;T: key&gt;(<a href="collection.md#0x4_collection">collection</a>: <a href="../../endless-framework/doc/object.md#0x1_object_Object">object::Object</a>&lt;T&gt;): <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_Option">option::Option</a>&lt;u64&gt;
-</code></pre>
-
-
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="collection.md#0x4_collection_max_supply">max_supply</a>&lt;T: key&gt;(<a href="collection.md#0x4_collection">collection</a>: Object&lt;T&gt;): Option&lt;u64&gt; <b>acquires</b> <a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a>, <a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a> {
-    <b>let</b> collection_address = <a href="../../endless-framework/doc/object.md#0x1_object_object_address">object::object_address</a>(&<a href="collection.md#0x4_collection">collection</a>);
-    <a href="collection.md#0x4_collection_check_collection_exists">check_collection_exists</a>(collection_address);
-
-    <b>if</b> (<b>exists</b>&lt;<a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a>&gt;(collection_address)) {
-        <b>let</b> supply = <b>borrow_global_mut</b>&lt;<a href="collection.md#0x4_collection_ConcurrentSupply">ConcurrentSupply</a>&gt;(collection_address);
-        <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_some">option::some</a>(<a href="../../endless-framework/doc/aggregator_v2.md#0x1_aggregator_v2_max_value">aggregator_v2::max_value</a>(&supply.current_supply))
-    } <b>else</b> <b>if</b> (<b>exists</b>&lt;<a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a>&gt;(collection_address)) {
-        <b>let</b> supply = <b>borrow_global_mut</b>&lt;<a href="collection.md#0x4_collection_FixedSupply">FixedSupply</a>&gt;(collection_address);
-        <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_some">option::some</a>(supply.max_supply)
     } <b>else</b> {
         <a href="../../endless-framework/../endless-stdlib/../move-stdlib/doc/option.md#0x1_option_none">option::none</a>()
     }

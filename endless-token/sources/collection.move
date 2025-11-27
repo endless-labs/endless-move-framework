@@ -304,8 +304,8 @@ module endless_token::collection {
             royalty::init(&constructor_ref, option::extract(&mut royalty))
         };
 
-        // let transfer_ref = object::generate_transfer_ref(&constructor_ref);
-        // object::disable_ungated_transfer(&transfer_ref);
+        let transfer_ref = object::generate_transfer_ref(&constructor_ref);
+        object::disable_ungated_transfer(&transfer_ref);
 
         constructor_ref
     }
@@ -542,22 +542,6 @@ module endless_token::collection {
     }
 
     #[view]
-    public fun max_supply<T: key>(collection: Object<T>): Option<u64> acquires FixedSupply, ConcurrentSupply {
-        let collection_address = object::object_address(&collection);
-        check_collection_exists(collection_address);
-
-        if (exists<ConcurrentSupply>(collection_address)) {
-            let supply = borrow_global_mut<ConcurrentSupply>(collection_address);
-            option::some(aggregator_v2::max_value(&supply.current_supply))
-        } else if (exists<FixedSupply>(collection_address)) {
-            let supply = borrow_global_mut<FixedSupply>(collection_address);
-            option::some(supply.max_supply)
-        } else {
-            option::none()
-        }
-    }
-
-    #[view]
     public fun creator<T: key>(collection: Object<T>): address acquires Collection {
         borrow(&collection).creator
     }
@@ -669,6 +653,7 @@ module endless_token::collection {
     }
 
     #[test(creator = @0x123, trader = @0x456)]
+    #[expected_failure(abort_code = 0x50003, location = endless_framework::object)]
     entry fun test_create_and_transfer(creator: &signer, trader: &signer) {
         let creator_address = signer::address_of(creator);
         let collection_name = string::utf8(b"collection name");

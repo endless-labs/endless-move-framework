@@ -1,5 +1,3 @@
-// Copyright © Endless
-
 use crate_crypto_internal_eth_kzg_bls12_381::{ff::PrimeField, G1Point, Scalar};
 use endless_crypto::poly_commit::{
     fk20::{

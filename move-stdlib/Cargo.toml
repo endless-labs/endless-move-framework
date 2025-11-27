@@ -1,6 +1,6 @@
 [package]
 name = "endless-move-stdlib"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Diem Association <opensource@diem.com>"]
 description = "Diem stdlib"
@@ -14,18 +14,20 @@ publish = false
 either = { workspace = true }
 endless-gas-schedule = { workspace = true } 
 endless-native-interface = { workspace = true }
+endless-types = { workspace = true }
+bcs = { workspace = true }
 anyhow = "1.0.52"
 hex = "0.4.3"
 log = "0.4.14"
-move-binary-format = { path = "../../../third_party/move/move-binary-format" }
-move-command-line-common = { path = "../../../third_party/move/move-command-line-common" }
-move-compiler = { path = "../../../third_party/move/move-compiler" }
-move-core-types = { path = "../../../third_party/move/move-core/types" }
-move-docgen = { path = "../../../third_party/move/move-prover/move-docgen" }
-move-errmapgen = { path = "../../../third_party/move/move-prover/move-errmapgen" }
-move-prover = { path = "../../../third_party/move/move-prover" }
-move-vm-runtime = { path = "../../../third_party/move/move-vm/runtime" }
-move-vm-types = { path = "../../../third_party/move/move-vm/types" }
+move-binary-format = { workspace = true }
+move-command-line-common = { workspace = true }
+move-compiler =  { workspace = true }
+move-core-types =  { workspace = true }
+move-docgen =  { workspace = true }
+move-errmapgen =  { workspace = true }
+move-prover =  { workspace = true }
+move-vm-runtime =  { workspace = true }
+move-vm-types =  { workspace = true }
 sha2 = "0.9.3"
 sha3 = "0.9.1"
 smallvec = "1.6.1"
@@ -34,9 +36,9 @@ walkdir = "2.3.1"
 [dev-dependencies]
 dir-diff = "0.3.2"
 file_diff = "1.0.0"
-move-cli = { path = "../../../third_party/move/tools/move-cli" }
-move-package = { path = "../../../third_party/move/tools/move-package" }
-move-unit-test = { path = "../../../third_party/move/tools/move-unit-test" }
+move-cli =  { workspace = true }
+move-package =  { workspace = true }
+move-unit-test =  { workspace = true }
 tempfile = "3.2.0"
 
 [features]

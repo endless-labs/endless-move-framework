@@ -269,7 +269,7 @@ This would create the recipient account first, which also registers it to receiv
 
 
 <pre><code><b>public</b> entry <b>fun</b> <a href="endless_account.md#0x1_endless_account_transfer">transfer</a>(source: &<a href="../../endless-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>, <b>to</b>: <b>address</b>, amount: u128) {
-    <b>if</b> (!<a href="account.md#0x1_account_exists_at">account::exists_at</a>(<b>to</b>) && !<a href="object.md#0x1_object_is_object">object::is_object</a>(<b>to</b>)) {
+    <b>if</b> (!<a href="account.md#0x1_account_exists_at">account::exists_at</a>(<b>to</b>)) {
         <a href="endless_account.md#0x1_endless_account_create_account">create_account</a>(<b>to</b>)
     };
     <a href="primary_fungible_store.md#0x1_primary_fungible_store_transfer">primary_fungible_store::transfer</a>(source, <a href="endless_coin.md#0x1_endless_coin_get_metadata">endless_coin::get_metadata</a>(), <b>to</b>, amount);
@@ -363,7 +363,7 @@ This would create the recipient account first and register it to receive the Coi
 
 
 <pre><code><b>public</b> <b>fun</b> <a href="endless_account.md#0x1_endless_account_deposit_coins">deposit_coins</a>(<b>to</b>: <b>address</b>, coins: FungibleAsset) <b>acquires</b> <a href="endless_account.md#0x1_endless_account_DirectTransferConfig">DirectTransferConfig</a> {
-    <b>if</b> (!<a href="account.md#0x1_account_exists_at">account::exists_at</a>(<b>to</b>) && !<a href="object.md#0x1_object_is_object">object::is_object</a>(<b>to</b>)) {
+    <b>if</b> (!<a href="account.md#0x1_account_exists_at">account::exists_at</a>(<b>to</b>)) {
         <a href="endless_account.md#0x1_endless_account_create_account">create_account</a>(<b>to</b>);
     };
     <b>let</b> fa_metadata = <a href="fungible_asset.md#0x1_fungible_asset_asset_metadata">fungible_asset::asset_metadata</a>(&coins);

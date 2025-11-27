@@ -36,16 +36,13 @@
 /// flat governance structure, clients are encouraged to write their own modules on top of this multisig account module
 /// and implement the governance voting logic on top.
 module endless_framework::multisig_account {
-    use endless_framework::account::{Self, SignerCapability, create_resource_address};
-    use endless_framework::endless_coin;
-    use endless_framework::chain_id;
+    use endless_framework::account;
     use endless_framework::create_signer::create_signer;
     use endless_framework::event::emit;
     use endless_framework::timestamp::now_seconds;
-    use endless_framework::primary_fungible_store;
     use endless_std::simple_map::{Self, SimpleMap};
     use endless_std::table::{Self, Table};
-    use std::bcs::to_bytes;
+    use endless_std::from_bcs;
     use std::error;
     use std::hash::sha3_256;
     use std::option::{Self, Option};
@@ -99,10 +96,6 @@ module endless_framework::multisig_account {
     /// Represents a multisig account's configurations and transactions.
     /// This will be stored in the multisig account (created as a resource account separate from any owner accounts).
     struct MultisigAccount has key {
-        // The list of all owner addresses.
-        owners: vector<address>,
-        // The number of signatures required to pass a transaction (k in k-of-n).
-        num_signatures_required: u64,
         // Map from transaction id (incrementing id) to transactions to execute for this multisig account.
         // Already executed transactions are deleted to save on storage but can always be accessed via events.
         transactions: Table<u64, MultisigTransaction>,
@@ -113,15 +106,6 @@ module endless_framework::multisig_account {
         // as there can be multiple pending transactions. The number of pending transactions should be equal to
         // next_sequence_number - (last_executed_sequence_number + 1).
         next_sequence_number: u64,
-        // The signer capability controlling the multisig (resource) account. This can be exchanged for the signer.
-        // Currently not used as the MultisigTransaction can validate and create a signer directly in the VM but
-        // this can be useful to have for on-chain composability in the future.
-        signer_cap: Option<SignerCapability>,
-        // The multisig account's metadata such as name, description, etc. This can be updated through the multisig
-        // transaction flow (i.e. self-update).
-        // Note: Attributes can be arbitrarily set by the multisig account and thus will only be used for off-chain
-        // display purposes only. They don't change any on-chain semantics of the multisig account.
-        metadata: SimpleMap<String, vector<u8>>,
     }
 
     /// A transaction to be executed in a multisig account.
@@ -254,25 +238,6 @@ module endless_framework::multisig_account {
     ////////////////////////// View functions ///////////////////////////////
 
     #[view]
-    /// Return the multisig account's metadata.
-    public fun metadata(multisig_account: address): SimpleMap<String, vector<u8>> acquires MultisigAccount {
-        borrow_global<MultisigAccount>(multisig_account).metadata
-    }
-
-    #[view]
-    /// Return the number of signatures required to execute or execute-reject a transaction in the provided
-    /// multisig account.
-    public fun num_signatures_required(multisig_account: address): u64 acquires MultisigAccount {
-        borrow_global<MultisigAccount>(multisig_account).num_signatures_required
-    }
-
-    #[view]
-    /// Return a vector of all of the provided multisig account's owners.
-    public fun owners(multisig_account: address): vector<address> acquires MultisigAccount {
-        borrow_global<MultisigAccount>(multisig_account).owners
-    }
-
-    #[view]
     /// Return the transaction with the given transaction id.
     public fun get_transaction(
         multisig_account: address,
@@ -325,9 +290,11 @@ module endless_framework::multisig_account {
             error::invalid_argument(EINVALID_SEQUENCE_NUMBER),
         );
         let transaction = table::borrow(&multisig_account_resource.transactions, sequence_number);
-        let (num_approvals, _) = num_approvals_and_rejections(&multisig_account_resource.owners, transaction);
+        let owners = get_owners(multisig_account);
+        let num_signatures_required = account::num_signatures_required(multisig_account);
+        let (num_approvals, _) = num_approvals_and_rejections(&owners, transaction);
         sequence_number == multisig_account_resource.last_executed_sequence_number + 1 &&
-            num_approvals >= multisig_account_resource.num_signatures_required
+            num_approvals >= num_signatures_required
     }
 
     #[view]
@@ -340,16 +307,11 @@ module endless_framework::multisig_account {
             error::invalid_argument(EINVALID_SEQUENCE_NUMBER),
         );
         let transaction = table::borrow(&multisig_account_resource.transactions, sequence_number);
-        let (_, num_rejections) = num_approvals_and_rejections(&multisig_account_resource.owners, transaction);
+        let owners = get_owners(multisig_account);
+        let num_signatures_required = account::num_signatures_required(multisig_account);
+        let (_, num_rejections) = num_approvals_and_rejections(&owners, transaction);
         sequence_number == multisig_account_resource.last_executed_sequence_number + 1 &&
-            num_rejections >= multisig_account_resource.num_signatures_required
-    }
-
-    #[view]
-    /// Return the predicted address for the next multisig account if created from the given creator address.
-    public fun get_next_multisig_account_address(creator: address): address {
-        let owner_nonce = account::get_sequence_number(creator);
-        create_resource_address(&creator, create_multisig_account_seed(to_bytes(&owner_nonce)))
+            num_rejections >= num_signatures_required
     }
 
     #[view]
@@ -382,371 +344,6 @@ module endless_framework::multisig_account {
         (voted, vote)
     }
 
-    ////////////////////////// Multisig account creation functions ///////////////////////////////
-
-    /// Creates a new multisig account on top of an existing account.
-    ///
-    /// This offers a migration path for an existing account with a multi-ed25519 auth key (native multisig account).
-    /// In order to ensure a malicious module cannot obtain backdoor control over an existing account, a signed message
-    /// with a valid signature from the account's auth key is required.
-    ///
-    /// Note that this does not revoke auth key-based control over the account. Owners should separately rotate the auth
-    /// key after they are fully migrated to the new multisig account. Alternatively, they can call
-    /// create_with_existing_account_and_revoke_auth_key instead.
-    public entry fun create_with_existing_account(
-        multisig_address: address,
-        owners: vector<address>,
-        num_signatures_required: u64,
-        account_scheme: u8,
-        account_public_key: vector<u8>,
-        create_multisig_account_signed_message: vector<u8>,
-        metadata_keys: vector<String>,
-        metadata_values: vector<vector<u8>>,
-    ) acquires MultisigAccount {
-        // Verify that the `MultisigAccountCreationMessage` has the right information and is signed by the account
-        // owner's key.
-        let proof_challenge = MultisigAccountCreationMessage {
-            chain_id: chain_id::get(),
-            account_address: multisig_address,
-            sequence_number: account::get_sequence_number(multisig_address),
-            owners,
-            num_signatures_required,
-        };
-        account::verify_signed_message(
-            multisig_address,
-            account_scheme,
-            account_public_key,
-            create_multisig_account_signed_message,
-            proof_challenge,
-        );
-
-        // We create the signer for the multisig account here since this is required to add the MultisigAccount resource
-        // This should be safe and authorized because we have verified the signed message from the existing account
-        // that authorizes creating a multisig account with the specified owners and signature threshold.
-        let multisig_account = &create_signer(multisig_address);
-        create_with_owners_internal(
-            multisig_account,
-            owners,
-            num_signatures_required,
-            option::none<SignerCapability>(),
-            metadata_keys,
-            metadata_values,
-        );
-    }
-
-    /// Creates a new multisig account on top of an existing account and immediately rotate the origin auth key to 0x0.
-    ///
-    /// Note: If the original account is a resource account, this does not revoke all control over it as if any
-    /// SignerCapability of the resource account still exists, it can still be used to generate the signer for the
-    /// account.
-    public entry fun create_with_existing_account_and_revoke_auth_key(
-        multisig_address: address,
-        owners: vector<address>,
-        num_signatures_required: u64,
-        account_scheme: u8,
-        account_public_key: vector<u8>,
-        create_multisig_account_signed_message: vector<u8>,
-        metadata_keys: vector<String>,
-        metadata_values: vector<vector<u8>>,
-    ) acquires MultisigAccount {
-        // Verify that the `MultisigAccountCreationMessage` has the right information and is signed by the account
-        // owner's key.
-        let proof_challenge = MultisigAccountCreationWithAuthKeyRevocationMessage {
-            chain_id: chain_id::get(),
-            account_address: multisig_address,
-            sequence_number: account::get_sequence_number(multisig_address),
-            owners,
-            num_signatures_required,
-        };
-        account::verify_signed_message(
-            multisig_address,
-            account_scheme,
-            account_public_key,
-            create_multisig_account_signed_message,
-            proof_challenge,
-        );
-
-        // We create the signer for the multisig account here since this is required to add the MultisigAccount resource
-        // This should be safe and authorized because we have verified the signed message from the existing account
-        // that authorizes creating a multisig account with the specified owners and signature threshold.
-        let multisig_account = &create_signer(multisig_address);
-        create_with_owners_internal(
-            multisig_account,
-            owners,
-            num_signatures_required,
-            option::none<SignerCapability>(),
-            metadata_keys,
-            metadata_values,
-        );
-
-        // Rotate the account's auth key to 0x0, which effectively revokes control via auth key.
-        account::rotate_authentication_key_internal(multisig_account, vector[]);
-    }
-
-    /// Creates a new multisig account and add the signer as a single owner.
-    public entry fun create(
-        owner: &signer,
-        num_signatures_required: u64,
-        metadata_keys: vector<String>,
-        metadata_values: vector<vector<u8>>,
-    ) acquires MultisigAccount {
-        create_with_owners(owner, vector[], num_signatures_required, metadata_keys, metadata_values);
-    }
-
-    /// Creates a new multisig account with the specified additional owner list and signatures required.
-    ///
-    /// @param additional_owners The owner account who calls this function cannot be in the additional_owners and there
-    /// cannot be any duplicate owners in the list.
-    /// @param num_signatures_required The number of signatures required to execute a transaction. Must be at least 1 and
-    /// at most the total number of owners.
-    public entry fun create_with_owners(
-        owner: &signer,
-        additional_owners: vector<address>,
-        num_signatures_required: u64,
-        metadata_keys: vector<String>,
-        metadata_values: vector<vector<u8>>,
-    ) acquires MultisigAccount {
-        let (multisig_account, multisig_signer_cap) = create_multisig_account(owner);
-        vector::push_back(&mut additional_owners, address_of(owner));
-        create_with_owners_internal(
-            &multisig_account,
-            additional_owners,
-            num_signatures_required,
-            option::some(multisig_signer_cap),
-            metadata_keys,
-            metadata_values,
-        );
-    }
-
-    /// Like `create_with_owners`, but removes the calling account after creation.
-    ///
-    /// This is for creating a vanity multisig account from a bootstrapping account that should not
-    /// be an owner after the vanity multisig address has been secured.
-    public entry fun create_with_owners_then_remove_bootstrapper(
-        bootstrapper: &signer,
-        owners: vector<address>,
-        num_signatures_required: u64,
-        metadata_keys: vector<String>,
-        metadata_values: vector<vector<u8>>,
-    ) acquires MultisigAccount {
-        let bootstrapper_address = address_of(bootstrapper);
-        create_with_owners(
-            bootstrapper,
-            owners,
-            num_signatures_required,
-            metadata_keys,
-            metadata_values
-        );
-        update_owner_schema(
-            get_next_multisig_account_address(bootstrapper_address),
-            vector[],
-            vector[bootstrapper_address],
-            option::none()
-        );
-    }
-
-    fun create_with_owners_internal(
-        multisig_account: &signer,
-        owners: vector<address>,
-        num_signatures_required: u64,
-        multisig_account_signer_cap: Option<SignerCapability>,
-        metadata_keys: vector<String>,
-        metadata_values: vector<vector<u8>>,
-    ) acquires MultisigAccount {
-        assert!(features::multisig_accounts_enabled(), error::unavailable(EMULTISIG_ACCOUNTS_NOT_ENABLED_YET));
-        assert!(
-            num_signatures_required > 0 && num_signatures_required <= vector::length(&owners),
-            error::invalid_argument(EINVALID_SIGNATURES_REQUIRED),
-        );
-
-        let multisig_address = address_of(multisig_account);
-        validate_owners(&owners, multisig_address);
-        move_to(multisig_account, MultisigAccount {
-            owners,
-            num_signatures_required,
-            transactions: table::new<u64, MultisigTransaction>(),
-            metadata: simple_map::create<String, vector<u8>>(),
-            // First transaction will start at id 1 instead of 0.
-            last_executed_sequence_number: 0,
-            next_sequence_number: 1,
-            signer_cap: multisig_account_signer_cap,
-        });
-
-        update_metadata_internal(multisig_account, metadata_keys, metadata_values, false);
-    }
-
-    ////////////////////////// Self-updates ///////////////////////////////
-
-    /// Similar to add_owners, but only allow adding one owner.
-    entry fun add_owner(multisig_account: &signer, new_owner: address) acquires MultisigAccount {
-        add_owners(multisig_account, vector[new_owner]);
-    }
-
-    /// Add new owners to the multisig account. This can only be invoked by the multisig account itself, through the
-    /// proposal flow.
-    ///
-    /// Note that this function is not public so it can only be invoked directly instead of via a module or script. This
-    /// ensures that a multisig transaction cannot lead to another module obtaining the multisig signer and using it to
-    /// maliciously alter the owners list.
-    entry fun add_owners(
-        multisig_account: &signer, new_owners: vector<address>) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            new_owners,
-            vector[],
-            option::none()
-        );
-    }
-
-    /// Add owners then update number of signatures required, in a single operation.
-    entry fun add_owners_and_update_signatures_required(
-        multisig_account: &signer,
-        new_owners: vector<address>,
-        new_num_signatures_required: u64
-    ) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            new_owners,
-            vector[],
-            option::some(new_num_signatures_required)
-        );
-    }
-
-    /// Similar to remove_owners, but only allow removing one owner.
-    entry fun remove_owner(
-        multisig_account: &signer, owner_to_remove: address) acquires MultisigAccount {
-        remove_owners(multisig_account, vector[owner_to_remove]);
-    }
-
-    /// Remove owners from the multisig account. This can only be invoked by the multisig account itself, through the
-    /// proposal flow.
-    ///
-    /// This function skips any owners who are not in the multisig account's list of owners.
-    /// Note that this function is not public so it can only be invoked directly instead of via a module or script. This
-    /// ensures that a multisig transaction cannot lead to another module obtaining the multisig signer and using it to
-    /// maliciously alter the owners list.
-    entry fun remove_owners(
-        multisig_account: &signer, owners_to_remove: vector<address>) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            vector[],
-            owners_to_remove,
-            option::none()
-        );
-    }
-
-    /// Swap an owner in for an old one, without changing required signatures.
-    entry fun swap_owner(
-        multisig_account: &signer,
-        to_swap_in: address,
-        to_swap_out: address
-    ) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            vector[to_swap_in],
-            vector[to_swap_out],
-            option::none()
-        );
-    }
-
-    /// Swap owners in and out, without changing required signatures.
-    entry fun swap_owners(
-        multisig_account: &signer,
-        to_swap_in: vector<address>,
-        to_swap_out: vector<address>
-    ) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            to_swap_in,
-            to_swap_out,
-            option::none()
-        );
-    }
-
-    /// Swap owners in and out, updating number of required signatures.
-    entry fun swap_owners_and_update_signatures_required(
-        multisig_account: &signer,
-        new_owners: vector<address>,
-        owners_to_remove: vector<address>,
-        new_num_signatures_required: u64
-    ) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            new_owners,
-            owners_to_remove,
-            option::some(new_num_signatures_required)
-        );
-    }
-
-    /// Update the number of signatures required to execute transaction in the specified multisig account.
-    ///
-    /// This can only be invoked by the multisig account itself, through the proposal flow.
-    /// Note that this function is not public so it can only be invoked directly instead of via a module or script. This
-    /// ensures that a multisig transaction cannot lead to another module obtaining the multisig signer and using it to
-    /// maliciously alter the number of signatures required.
-    entry fun update_signatures_required(
-        multisig_account: &signer, new_num_signatures_required: u64) acquires MultisigAccount {
-        update_owner_schema(
-            address_of(multisig_account),
-            vector[],
-            vector[],
-            option::some(new_num_signatures_required)
-        );
-    }
-
-    /// Allow the multisig account to update its own metadata. Note that this overrides the entire existing metadata.
-    /// If any attributes are not specified in the metadata, they will be removed!
-    ///
-    /// This can only be invoked by the multisig account itself, through the proposal flow.
-    /// Note that this function is not public so it can only be invoked directly instead of via a module or script. This
-    /// ensures that a multisig transaction cannot lead to another module obtaining the multisig signer and using it to
-    /// maliciously alter the number of signatures required.
-    entry fun update_metadata(
-        multisig_account: &signer, keys: vector<String>, values: vector<vector<u8>>) acquires MultisigAccount {
-        update_metadata_internal(multisig_account, keys, values, true);
-    }
-
-    fun update_metadata_internal(
-        multisig_account: &signer,
-        keys: vector<String>,
-        values: vector<vector<u8>>,
-        emit: bool,
-    ) acquires MultisigAccount {
-        let num_attributes = vector::length(&keys);
-        assert!(
-            num_attributes == vector::length(&values),
-            error::invalid_argument(ENUMBER_OF_METADATA_KEYS_AND_VALUES_DONT_MATCH),
-        );
-
-        let multisig_address = address_of(multisig_account);
-        assert_multisig_account_exists(multisig_address);
-        let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_address);
-        let old_metadata = multisig_account_resource.metadata;
-        multisig_account_resource.metadata = simple_map::create<String, vector<u8>>();
-        let metadata = &mut multisig_account_resource.metadata;
-        let i = 0;
-        while (i < num_attributes) {
-            let key = *vector::borrow(&keys, i);
-            let value = *vector::borrow(&values, i);
-            assert!(
-                !simple_map::contains_key(metadata, &key),
-                error::invalid_argument(EDUPLICATE_METADATA_KEY),
-            );
-
-            simple_map::add(metadata, key, value);
-            i = i + 1;
-        };
-
-        if (emit) {
-            emit(
-                MetadataUpdatedEvent {
-                    old_metadata,
-                    new_metadata: multisig_account_resource.metadata,
-                }
-            );
-        };
-    }
-
     ////////////////////////// Multisig transaction flow ///////////////////////////////
 
     /// Create a multisig transaction, which will have one approval initially (from the creator).
@@ -757,9 +354,17 @@ module endless_framework::multisig_account {
     ) acquires MultisigAccount {
         assert!(vector::length(&payload) > 0, error::invalid_argument(EPAYLOAD_CANNOT_BE_EMPTY));
 
-        assert_multisig_account_exists(multisig_account);
+        assert_account_exists(multisig_account);
+        if (!exists<MultisigAccount>(multisig_account)) {
+            move_to(&create_signer(multisig_account), MultisigAccount {
+                transactions: table::new(),
+                last_executed_sequence_number: 0,
+                next_sequence_number: 1,
+            });
+        };
+
         let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_account);
-        assert_is_owner(owner, multisig_account_resource);
+        assert_is_owner(owner, multisig_account);
 
         let creator = address_of(owner);
         let transaction = MultisigTransaction {
@@ -783,9 +388,16 @@ module endless_framework::multisig_account {
         // Payload hash is a sha3-256 hash, so it must be exactly 32 bytes.
         assert!(vector::length(&payload_hash) == 32, error::invalid_argument(EINVALID_PAYLOAD_HASH));
 
-        assert_multisig_account_exists(multisig_account);
+        assert_account_exists(multisig_account);
+        if (!exists<MultisigAccount>(multisig_account)) {
+            move_to(&create_signer(multisig_account), MultisigAccount {
+                transactions: table::new(),
+                last_executed_sequence_number: 0,
+                next_sequence_number: 1,
+            });
+        };
         let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_account);
-        assert_is_owner(owner, multisig_account_resource);
+        assert_is_owner(owner, multisig_account);
 
         let creator = address_of(owner);
         let transaction = MultisigTransaction {
@@ -815,7 +427,7 @@ module endless_framework::multisig_account {
         owner: &signer, multisig_account: address, sequence_number: u64, approved: bool) acquires MultisigAccount {
         assert_multisig_account_exists(multisig_account);
         let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_account);
-        assert_is_owner(owner, multisig_account_resource);
+        assert_is_owner(owner, multisig_account);
 
         assert!(
             table::contains(&multisig_account_resource.transactions, sequence_number),
@@ -847,15 +459,17 @@ module endless_framework::multisig_account {
     ) acquires MultisigAccount {
         assert_multisig_account_exists(multisig_account);
         let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_account);
-        assert_is_owner(owner, multisig_account_resource);
+        assert_is_owner(owner, multisig_account);
         let sequence_number = multisig_account_resource.last_executed_sequence_number + 1;
         assert!(
             table::contains(&multisig_account_resource.transactions, sequence_number),
             error::not_found(ETRANSACTION_NOT_FOUND),
         );
-        let (_, num_rejections) = remove_executed_transaction(multisig_account_resource);
+        let owners = get_owners(multisig_account);
+        let (_, num_rejections) = remove_executed_transaction(multisig_account_resource, &owners);
+        let num_signatures_required = account::num_signatures_required(multisig_account);
         assert!(
-            num_rejections >= multisig_account_resource.num_signatures_required,
+            num_rejections >= num_signatures_required,
             error::invalid_state(ENOT_ENOUGH_REJECTIONS),
         );
 
@@ -878,16 +492,18 @@ module endless_framework::multisig_account {
         owner: &signer, multisig_account: address, payload: vector<u8>) acquires MultisigAccount {
         assert_multisig_account_exists(multisig_account);
         let multisig_account_resource = borrow_global<MultisigAccount>(multisig_account);
-        assert_is_owner(owner, multisig_account_resource);
+        assert_is_owner(owner, multisig_account);
         let sequence_number = multisig_account_resource.last_executed_sequence_number + 1;
         assert!(
             table::contains(&multisig_account_resource.transactions, sequence_number),
             error::invalid_argument(ETRANSACTION_NOT_FOUND),
         );
         let transaction = table::borrow(&multisig_account_resource.transactions, sequence_number);
-        let (num_approvals, _) = num_approvals_and_rejections(&multisig_account_resource.owners, transaction);
+        let owners = get_owners(multisig_account);
+        let num_signatures_required = account::num_signatures_required(multisig_account);
+        let (num_approvals, _) = num_approvals_and_rejections(&owners, transaction);
         assert!(
-            num_approvals >= multisig_account_resource.num_signatures_required,
+            num_approvals >= num_signatures_required,
             error::invalid_argument(ENOT_ENOUGH_APPROVALS),
         );
 
@@ -910,7 +526,8 @@ module endless_framework::multisig_account {
         transaction_payload: vector<u8>,
     ) acquires MultisigAccount {
         let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_account);
-        let (num_approvals, _) = remove_executed_transaction(multisig_account_resource);
+        let owners = get_owners(multisig_account);
+        let (num_approvals, _) = remove_executed_transaction(multisig_account_resource, &owners);
         emit(
             TransactionExecutionSucceededEvent {
                 sequence_number: multisig_account_resource.last_executed_sequence_number,
@@ -930,7 +547,8 @@ module endless_framework::multisig_account {
         execution_error: ExecutionError,
     ) acquires MultisigAccount {
         let multisig_account_resource = borrow_global_mut<MultisigAccount>(multisig_account);
-        let (num_approvals, _) = remove_executed_transaction(multisig_account_resource);
+        let owners = get_owners(multisig_account);
+        let (num_approvals, _) = remove_executed_transaction(multisig_account_resource, &owners);
         emit(
             TransactionExecutionFailedEvent {
                 executor,
@@ -945,11 +563,11 @@ module endless_framework::multisig_account {
     ////////////////////////// Private functions ///////////////////////////////
 
     // Remove the next transaction in the queue as it's been executed and return the number of approvals it had.
-    fun remove_executed_transaction(multisig_account_resource: &mut MultisigAccount): (u64, u64) {
+    fun remove_executed_transaction(multisig_account_resource: &mut MultisigAccount, owners: &vector<address>): (u64, u64) {
         let sequence_number = multisig_account_resource.last_executed_sequence_number + 1;
         let transaction = table::remove(&mut multisig_account_resource.transactions, sequence_number);
         multisig_account_resource.last_executed_sequence_number = sequence_number;
-        num_approvals_and_rejections(&multisig_account_resource.owners, &transaction)
+        num_approvals_and_rejections(owners, &transaction)
     }
 
     fun add_transaction(creator: address, multisig_account: &mut MultisigAccount, transaction: MultisigTransaction) {
@@ -964,40 +582,20 @@ module endless_framework::multisig_account {
         );
     }
 
-    fun create_multisig_account(owner: &signer): (signer, SignerCapability) {
-        let owner_nonce = account::get_sequence_number(address_of(owner));
-        let (multisig_signer, multisig_signer_cap) =
-            account::create_resource_account(owner, create_multisig_account_seed(to_bytes(&owner_nonce)));
-        // Register the account to receive APT as this is not done by default as part of the resource account creation
-        // flow.
-        primary_fungible_store::ensure_primary_store_exists(address_of(owner), endless_coin::get_metadata());
-
-        (multisig_signer, multisig_signer_cap)
-    }
-
-    fun create_multisig_account_seed(seed: vector<u8>): vector<u8> {
-        // Generate a seed that will be used to create the resource account that hosts the multisig account.
-        let multisig_account_seed = vector::empty<u8>();
-        vector::append(&mut multisig_account_seed, DOMAIN_SEPARATOR);
-        vector::append(&mut multisig_account_seed, seed);
-
-        multisig_account_seed
-    }
-
-    fun validate_owners(owners: &vector<address>, multisig_account: address) {
-        let distinct_owners: vector<address> = vector[];
-        vector::for_each_ref(owners, |owner| {
-            let owner = *owner;
-            assert!(owner != multisig_account, error::invalid_argument(EOWNER_CANNOT_BE_MULTISIG_ACCOUNT_ITSELF));
-            let (found, _) = vector::index_of(&distinct_owners, &owner);
-            assert!(!found, error::invalid_argument(EDUPLICATE_OWNER));
-            vector::push_back(&mut distinct_owners, owner);
+    fun get_owners(multisig_account: address): vector<address> {
+        let authentication_key = account::get_authentication_key(multisig_account);
+        let owners = vector[];
+        vector::for_each_reverse(authentication_key, |key| {
+            vector::push_back(&mut owners, from_bcs::to_address(key));
         });
+        owners
     }
 
-    fun assert_is_owner(owner: &signer, multisig_account: &MultisigAccount) {
+    fun assert_is_owner(owner: &signer, multisig_account: address) {
+        let owner = address_of(owner);
+        assert!(account::is_original_account(owner), error::permission_denied(ENOT_OWNER));
         assert!(
-            vector::contains(&multisig_account.owners, &address_of(owner)),
+            vector::contains(&get_owners(multisig_account), &owner),
             error::permission_denied(ENOT_OWNER),
         );
     }
@@ -1022,85 +620,11 @@ module endless_framework::multisig_account {
 
     fun assert_multisig_account_exists(multisig_account: address) {
         assert!(exists<MultisigAccount>(multisig_account), error::invalid_state(EACCOUNT_NOT_MULTISIG));
+        assert_account_exists(multisig_account);
     }
 
-    /// Add new owners, remove owners to remove, update signatures required.
-    fun update_owner_schema(
-        multisig_address: address,
-        new_owners: vector<address>,
-        owners_to_remove: vector<address>,
-        optional_new_num_signatures_required: Option<u64>,
-    ) acquires MultisigAccount {
-        assert_multisig_account_exists(multisig_address);
-        let multisig_account_ref_mut =
-            borrow_global_mut<MultisigAccount>(multisig_address);
-        // Verify no overlap between new owners and owners to remove.
-        vector::for_each_ref(&new_owners, |new_owner_ref| {
-            assert!(
-                !vector::contains(&owners_to_remove, new_owner_ref),
-                error::invalid_argument(EOWNERS_TO_REMOVE_NEW_OWNERS_OVERLAP)
-            )
-        });
-        // If new owners provided, try to add them and emit an event.
-        if (vector::length(&new_owners) > 0) {
-            vector::append(&mut multisig_account_ref_mut.owners, new_owners);
-            validate_owners(
-                &multisig_account_ref_mut.owners,
-                multisig_address
-            );
-            emit(
-                AddOwnersEvent { owners_added: new_owners }
-            );
-        };
-        // If owners to remove provided, try to remove them.
-        if (vector::length(&owners_to_remove) > 0) {
-            let owners_ref_mut = &mut multisig_account_ref_mut.owners;
-            let owners_removed = vector[];
-            vector::for_each_ref(&owners_to_remove, |owner_to_remove_ref| {
-                let (found, index) =
-                    vector::index_of(owners_ref_mut, owner_to_remove_ref);
-                if (found) {
-                    vector::push_back(
-                        &mut owners_removed,
-                        vector::swap_remove(owners_ref_mut, index)
-                    );
-                }
-            });
-            // Only emit event if owner(s) actually removed.
-            if (vector::length(&owners_removed) > 0) {
-                emit(
-                    RemoveOwnersEvent { owners_removed }
-                );
-            }
-        };
-        // If new signature count provided, try to update count.
-        if (option::is_some(&optional_new_num_signatures_required)) {
-            let new_num_signatures_required =
-                option::extract(&mut optional_new_num_signatures_required);
-            assert!(
-                new_num_signatures_required > 0,
-                error::invalid_argument(EINVALID_SIGNATURES_REQUIRED)
-            );
-            let old_num_signatures_required =
-                multisig_account_ref_mut.num_signatures_required;
-            // Only apply update and emit event if a change indicated.
-            if (new_num_signatures_required != old_num_signatures_required) {
-                multisig_account_ref_mut.num_signatures_required =
-                    new_num_signatures_required;
-                emit(
-                    UpdateSignaturesRequiredEvent {
-                        old_num_signatures_required,
-                        new_num_signatures_required,
-                    }
-                );
-            }
-        };
-        // Verify number of owners.
-        let num_owners = vector::length(&multisig_account_ref_mut.owners);
-        assert!(
-            num_owners >= multisig_account_ref_mut.num_signatures_required,
-            error::invalid_state(ENOT_ENOUGH_OWNERS)
-        );
+    fun assert_account_exists(account: address) {
+        assert!(account::exists_at(account),  error::invalid_state(EACCOUNT_NOT_MULTISIG));
     }
 
     ////////////////////////// Tests ///////////////////////////////
@@ -1110,12 +634,11 @@ module endless_framework::multisig_account {
     #[test_only]
     use endless_framework::timestamp;
     #[test_only]
-    use endless_std::multi_ed25519;
-    #[test_only]
-    use endless_std::from_bcs;
-    #[test_only]
     use std::string::utf8;
+    #[test_only]
     use std::features;
+    #[test_only]
+    use endless_framework::chain_id;
 
     #[test_only]
     const PAYLOAD: vector<u8> = vector[1, 2, 3];
@@ -1163,8 +686,10 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         // Create three transactions.
         create_transaction(owner_1, multisig_account, PAYLOAD);
@@ -1206,291 +731,6 @@ module endless_framework::multisig_account {
         assert!(get_pending_transactions(multisig_account) == vector[], 0);
     }
 
-    #[test(core = @0x1, owner = @0x123)]
-    public entry fun test_create_with_single_owner(core: &signer, owner: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_addr = address_of(owner);
-        create_account_for_test(owner_addr);
-        create(owner, 1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_addr);
-        assert_multisig_account_exists(multisig_account);
-        assert!(owners(multisig_account) == vector[owner_addr], 0);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    public entry fun test_create_with_as_many_sigs_required_as_num_owners(
-         core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_1_addr = address_of(owner_1);
-        create_account_for_test(owner_1_addr);
-        create_with_owners(owner_1, vector[address_of(owner_2), address_of(owner_3)], 3, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        assert_multisig_account_exists(multisig_account);
-    }
-
-    #[test(core = @0x1, owner = @0x123)]
-    #[expected_failure(abort_code = 0x1000B, location = Self)]
-    public entry fun test_create_with_zero_signatures_required_should_fail(
-        core: &signer, owner: &signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner));
-        create(owner, 0, vector[], vector[]);
-    }
-
-    #[test(core = @0x1, owner = @0x123)]
-    #[expected_failure(abort_code = 0x1000B, location = Self)]
-    public entry fun test_create_with_too_many_signatures_required_should_fail(
-        core: &signer, owner: &signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner));
-        create(owner, 2, vector[], vector[]);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    #[expected_failure(abort_code = 0x10001, location = Self)]
-    public entry fun test_create_with_duplicate_owners_should_fail(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner_1));
-        create_with_owners(
-            owner_1,
-            vector[
-                // Duplicate owner 2 addresses.
-                address_of(owner_2),
-                address_of(owner_3),
-                address_of(owner_2),
-            ],
-            2,
-            vector[],
-            vector[]);
-    }
-
-    #[test(core = @0x1, owner = @0x123)]
-    #[expected_failure(abort_code = 0xD000E, location = Self)]
-    public entry fun test_create_with_without_feature_flag_enabled_should_fail(
-        core: &signer, owner: &signer) acquires MultisigAccount {
-        let (_, _, _) = endless_framework::endless_coin::initialize_for_test(core);
-        setup_disabled();
-        create_account_for_test(address_of(owner));
-        create(owner, 2, vector[], vector[]);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    #[expected_failure(abort_code = 0x10001, location = Self)]
-    public entry fun test_create_with_creator_in_additional_owners_list_should_fail(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner_1));
-        create_with_owners(owner_1, vector[
-            // Duplicate owner 1 addresses.
-            address_of(owner_1),
-            address_of(owner_2),
-            address_of(owner_3),
-        ], 2,
-            vector[],
-            vector[],
-        );
-    }
-
-    #[test(core = @0x1)]
-    public entry fun test_create_multisig_account_on_top_of_existing_multi_ed25519_account(core: &signer)
-    acquires MultisigAccount {
-        setup(core);
-        let (curr_sk, curr_pk) = multi_ed25519::generate_keys(2, 3);
-        let pk_unvalidated = multi_ed25519::public_key_to_unvalidated(&curr_pk);
-        let auth_key = multi_ed25519::unvalidated_public_key_to_authentication_key(&pk_unvalidated);
-        let multisig_address = from_bcs::to_address(auth_key);
-        create_account_for_test(multisig_address);
-
-        let expected_owners = vector[@0x123, @0x124, @0x125];
-        let proof = MultisigAccountCreationMessage {
-            chain_id: chain_id::get(),
-            account_address: multisig_address,
-            sequence_number: account::get_sequence_number(multisig_address),
-            owners: expected_owners,
-            num_signatures_required: 2,
-        };
-        let signed_proof = multi_ed25519::sign_struct(&curr_sk, proof);
-        create_with_existing_account(
-            multisig_address,
-            expected_owners,
-            2,
-            1, // MULTI_ED25519_SCHEME
-            multi_ed25519::unvalidated_public_key_to_bytes(&pk_unvalidated),
-            multi_ed25519::signature_to_bytes(&signed_proof),
-            vector[],
-            vector[],
-        );
-        assert_multisig_account_exists(multisig_address);
-        assert!(owners(multisig_address) == expected_owners, 0);
-    }
-
-    #[test(core = @0x1)]
-    public entry fun test_create_multisig_account_on_top_of_existing_multi_ed25519_account_and_revoke_auth_key(core: &signer)
-    acquires MultisigAccount {
-        setup(core);
-        let (curr_sk, curr_pk) = multi_ed25519::generate_keys(2, 3);
-        let pk_unvalidated = multi_ed25519::public_key_to_unvalidated(&curr_pk);
-        let auth_key = multi_ed25519::unvalidated_public_key_to_authentication_key(&pk_unvalidated);
-        let multisig_address = from_bcs::to_address(auth_key);
-        create_account_for_test(multisig_address);
-
-        let expected_owners = vector[@0x123, @0x124, @0x125];
-        let proof = MultisigAccountCreationWithAuthKeyRevocationMessage {
-            chain_id: chain_id::get(),
-            account_address: multisig_address,
-            sequence_number: account::get_sequence_number(multisig_address),
-            owners: expected_owners,
-            num_signatures_required: 2,
-        };
-        let signed_proof = multi_ed25519::sign_struct(&curr_sk, proof);
-        create_with_existing_account_and_revoke_auth_key(
-            multisig_address,
-            expected_owners,
-            2,
-            1, // MULTI_ED25519_SCHEME
-            multi_ed25519::unvalidated_public_key_to_bytes(&pk_unvalidated),
-            multi_ed25519::signature_to_bytes(&signed_proof),
-            vector[],
-            vector[],
-        );
-        assert_multisig_account_exists(multisig_address);
-        assert!(owners(multisig_address) == expected_owners, 0);
-        assert!(vector::is_empty(&account::get_authentication_key(multisig_address)), 1);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    public entry fun test_update_signatures_required(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_1_addr = address_of(owner_1);
-        create_account_for_test(owner_1_addr);
-        create_with_owners(owner_1, vector[address_of(owner_2), address_of(owner_3)], 1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        assert!(num_signatures_required(multisig_account) == 1, 0);
-        update_signatures_required(&create_signer(multisig_account), 2);
-        assert!(num_signatures_required(multisig_account) == 2, 1);
-        // As many signatures required as number of owners (3).
-        update_signatures_required(&create_signer(multisig_account), 3);
-        assert!(num_signatures_required(multisig_account) == 3, 2);
-    }
-
-    #[test(core = @0x1, owner = @0x123)]
-    public entry fun test_update_metadata(core: &signer, owner: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_addr = address_of(owner);
-        create_account_for_test(owner_addr);
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_addr);
-        update_metadata(
-            &create_signer(multisig_account),
-            vector[utf8(b"key1"), utf8(b"key2")],
-            vector[vector[1], vector[2]],
-        );
-        let updated_metadata = metadata(multisig_account);
-        assert!(simple_map::length(&updated_metadata) == 2, 0);
-        assert!(simple_map::borrow(&updated_metadata, &utf8(b"key1")) == &vector[1], 0);
-        assert!(simple_map::borrow(&updated_metadata, &utf8(b"key2")) == &vector[2], 0);
-    }
-
-    #[test(core = @0x1, owner = @0x123)]
-    #[expected_failure(abort_code = 0x1000B, location = Self)]
-    public entry fun test_update_with_zero_signatures_required_should_fail(
-        core: &signer, owner:& signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        update_signatures_required(&create_signer(multisig_account), 0);
-    }
-
-    #[test(core = @0x1, owner = @0x123)]
-    #[expected_failure(abort_code = 0x30005, location = Self)]
-    public entry fun test_update_with_too_many_signatures_required_should_fail(
-        core: &signer, owner: &signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        update_signatures_required(&create_signer(multisig_account), 2);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    public entry fun test_add_owners(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        create_account_for_test(address_of(owner_1));
-        create(owner_1, 1, vector[], vector[]);
-        let owner_1_addr = address_of(owner_1);
-        let owner_2_addr = address_of(owner_2);
-        let owner_3_addr = address_of(owner_3);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        let multisig_signer = &create_signer(multisig_account);
-        assert!(owners(multisig_account) == vector[owner_1_addr], 0);
-        // Adding an empty vector of new owners should be no-op.
-        add_owners(multisig_signer, vector[]);
-        assert!(owners(multisig_account) == vector[owner_1_addr], 1);
-        add_owners(multisig_signer, vector[owner_2_addr, owner_3_addr]);
-        assert!(owners(multisig_account) == vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    public entry fun test_remove_owners(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_1_addr = address_of(owner_1);
-        let owner_2_addr = address_of(owner_2);
-        let owner_3_addr = address_of(owner_3);
-        create_account_for_test(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        let multisig_signer = &create_signer(multisig_account);
-        assert!(owners(multisig_account) == vector[owner_2_addr, owner_3_addr, owner_1_addr], 0);
-        // Removing an empty vector of owners should be no-op.
-        remove_owners(multisig_signer, vector[]);
-        assert!(owners(multisig_account) == vector[owner_2_addr, owner_3_addr, owner_1_addr], 1);
-        remove_owners(multisig_signer, vector[owner_2_addr]);
-        assert!(owners(multisig_account) == vector[owner_1_addr, owner_3_addr], 2);
-        // Removing owners that don't exist should be no-op.
-        remove_owners(multisig_signer, vector[@0x130]);
-        assert!(owners(multisig_account) == vector[owner_1_addr, owner_3_addr], 3);
-        // Removing with duplicate owners should still work.
-        remove_owners(multisig_signer, vector[owner_3_addr, owner_3_addr, owner_3_addr]);
-        assert!(owners(multisig_account) == vector[owner_1_addr], 4);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    #[expected_failure(abort_code = 0x30005, location = Self)]
-    public entry fun test_remove_all_owners_should_fail(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_1_addr = address_of(owner_1);
-        let owner_2_addr = address_of(owner_2);
-        let owner_3_addr = address_of(owner_3);
-        create_account_for_test(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        assert!(owners(multisig_account) == vector[owner_2_addr, owner_3_addr, owner_1_addr], 0);
-        let multisig_signer = &create_signer(multisig_account);
-        remove_owners(multisig_signer, vector[owner_1_addr, owner_2_addr, owner_3_addr]);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
-    #[expected_failure(abort_code = 0x30005, location = Self)]
-    public entry fun test_remove_owners_with_fewer_remaining_than_signature_threshold_should_fail(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
-        setup(core);
-        let owner_1_addr = address_of(owner_1);
-        let owner_2_addr = address_of(owner_2);
-        let owner_3_addr = address_of(owner_3);
-        create_account_for_test(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        let multisig_signer = &create_signer(multisig_account);
-        // Remove 2 owners so there's one left, which is less than the signature threshold of 2.
-        remove_owners(multisig_signer, vector[owner_2_addr, owner_3_addr]);
-    }
-
     #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125)]
     public entry fun test_create_transaction(
         core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer) acquires MultisigAccount {
@@ -1499,8 +739,8 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         let transaction = get_transaction(multisig_account, 1);
@@ -1520,8 +760,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
         create_transaction(owner, multisig_account, vector[]);
     }
 
@@ -1531,8 +771,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer, non_owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
+        let multisig_account = @0x1111;
+        create_account_for_test(multisig_account);
         create_transaction(non_owner, multisig_account, PAYLOAD);
     }
 
@@ -1541,8 +781,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
         create_transaction_with_hash(owner, multisig_account, sha3_256(PAYLOAD));
     }
 
@@ -1552,8 +792,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
         create_transaction_with_hash(owner, multisig_account, vector[]);
     }
 
@@ -1563,8 +803,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer, non_owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        create(owner,1, vector[], vector[]);
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
+        let multisig_account = @0x1111;
+        create_account_for_test(multisig_account);
         create_transaction_with_hash(non_owner, multisig_account, sha3_256(PAYLOAD));
     }
 
@@ -1576,8 +816,10 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         approve_transaction(owner_2, multisig_account, 1);
@@ -1597,16 +839,16 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         // Owner 1 and 2 approved but then owner 1 got removed.
         create_transaction(owner_1, multisig_account, PAYLOAD);
         approve_transaction(owner_2, multisig_account, 1);
         // Before owner 1 is removed, the transaction technically has sufficient approvals.
         assert!(can_be_executed(multisig_account, 1), 0);
-        let multisig_signer = &create_signer(multisig_account);
-        remove_owners(multisig_signer, vector[owner_1_addr]);
+        account::set_authentication_key_for_test(multisig_account, vector[owner_2_addr, owner_3_addr], 2);
         // Now that owner 1 is removed, their approval should be invalidated and the transaction no longer
         // has enough approvals to be executed.
         assert!(!can_be_executed(multisig_account, 1), 1);
@@ -1618,8 +860,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        create(owner, 1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
         // Transaction is created with id 1.
         create_transaction(owner, multisig_account, PAYLOAD);
         approve_transaction(owner, multisig_account, 2);
@@ -1631,8 +873,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer, non_owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        create(owner, 1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
         // Transaction is created with id 1.
         create_transaction(owner, multisig_account, PAYLOAD);
         approve_transaction(non_owner, multisig_account, 1);
@@ -1644,8 +886,8 @@ module endless_framework::multisig_account {
         setup(core);
         let owner_addr = address_of(owner);
         create_account_for_test(owner_addr);
-        let multisig_account = get_next_multisig_account_address(owner_addr);
-        create(owner, 1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
 
         create_transaction(owner, multisig_account, PAYLOAD);
         reject_transaction(owner, multisig_account, 1);
@@ -1662,8 +904,10 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         reject_transaction(owner_1, multisig_account, 1);
@@ -1682,8 +926,8 @@ module endless_framework::multisig_account {
         setup(core);
         let owner_addr = address_of(owner);
         create_account_for_test(owner_addr);
-        let multisig_account = get_next_multisig_account_address(owner_addr);
-        create(owner, 1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_addr], 1);
 
         create_transaction(owner, multisig_account, PAYLOAD);
         reject_transaction(owner, multisig_account, 1);
@@ -1697,8 +941,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        create(owner, 1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
         // Transaction is created with id 1.
         create_transaction(owner, multisig_account, PAYLOAD);
         reject_transaction(owner, multisig_account, 2);
@@ -1710,8 +954,9 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer, non_owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        create(owner, 1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
+        create_transaction(owner, multisig_account, PAYLOAD);
         reject_transaction(non_owner, multisig_account, 1);
     }
 
@@ -1723,8 +968,10 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         // Owner 1 doesn't need to explicitly approve as they created the transaction.
@@ -1742,8 +989,9 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         // Owner 1 doesn't need to explicitly approve as they created the transaction.
@@ -1761,8 +1009,9 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction_with_hash(owner_3, multisig_account, sha3_256(PAYLOAD));
         // Owner 3 doesn't need to explicitly approve as they created the transaction.
@@ -1780,8 +1029,10 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         reject_transaction(owner_2, multisig_account, 1);
@@ -1797,8 +1048,8 @@ module endless_framework::multisig_account {
         core: &signer, owner: &signer, non_owner: &signer) acquires MultisigAccount {
         setup(core);
         create_account_for_test(address_of(owner));
-        let multisig_account = get_next_multisig_account_address(address_of(owner));
-        create(owner,1, vector[], vector[]);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[address_of(owner)], 1);
 
         create_transaction(owner, multisig_account, PAYLOAD);
         reject_transaction(owner, multisig_account, 1);
@@ -1814,38 +1065,13 @@ module endless_framework::multisig_account {
         let owner_2_addr = address_of(owner_2);
         let owner_3_addr = address_of(owner_3);
         create_account_for_test(owner_1_addr);
-        let multisig_account = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(owner_1, vector[owner_2_addr, owner_3_addr], 2, vector[], vector[]);
+        create_account_for_test(owner_2_addr);
+        create_account_for_test(owner_3_addr);
+        let multisig_account = @0x1111;
+        account::set_authentication_key_for_test(multisig_account, vector[owner_1_addr, owner_2_addr, owner_3_addr], 2);
 
         create_transaction(owner_1, multisig_account, PAYLOAD);
         reject_transaction(owner_2, multisig_account, 1);
         execute_rejected_transaction(owner_3, multisig_account);
-    }
-
-    #[test(core = @0x1, owner_1 = @0x123, owner_2 = @0x124, owner_3 = @0x125
-    )]
-    #[expected_failure(abort_code = 0x10012, location = Self)]
-    fun test_update_owner_schema_overlap_should_fail(
-        core: &signer, owner_1: &signer, owner_2: &signer, owner_3: &signer
-    ) acquires MultisigAccount {
-        setup(core);
-        let owner_1_addr = address_of(owner_1);
-        let owner_2_addr = address_of(owner_2);
-        let owner_3_addr = address_of(owner_3);
-        create_account_for_test(owner_1_addr);
-        let multisig_address = get_next_multisig_account_address(owner_1_addr);
-        create_with_owners(
-            owner_1,
-            vector[owner_2_addr, owner_3_addr],
-            2,
-            vector[],
-            vector[]
-        );
-        update_owner_schema(
-            multisig_address,
-            vector[owner_1_addr],
-            vector[owner_1_addr],
-            option::none()
-        );
     }
 }

@@ -70,7 +70,7 @@ module endless_framework::endless_account {
     /// Convenient function to transfer EDS to a recipient account that might not exist.
     /// This would create the recipient account first, which also registers it to receive EDS, before transferring.
     public entry fun transfer(source: &signer, to: address, amount: u128) {
-        if (!account::exists_at(to) && !object::is_object(to)) {
+        if (!account::exists_at(to)) {
             create_account(to)
         };
         primary_fungible_store::transfer(source, endless_coin::get_metadata(), to, amount);
@@ -104,7 +104,7 @@ module endless_framework::endless_account {
     /// Convenient function to deposit a custom CoinType into a recipient account that might not exist.
     /// This would create the recipient account first and register it to receive the CoinType, before transferring.
     public fun deposit_coins(to: address, coins: FungibleAsset) acquires DirectTransferConfig {
-        if (!account::exists_at(to) && !object::is_object(to)) {
+        if (!account::exists_at(to)) {
             create_account(to);
         };
         let fa_metadata = fungible_asset::asset_metadata(&coins);

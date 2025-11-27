@@ -1,5 +1,3 @@
-// Copyright © Endless
-
 use endless_crypto::poly_commit::{
     ipa,
     ipa::{

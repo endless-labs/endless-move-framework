@@ -42,6 +42,7 @@
 <b>use</b> <a href="fungible_asset.md#0x1_fungible_asset">0x1::fungible_asset</a>;
 <b>use</b> <a href="gas_schedule.md#0x1_gas_schedule">0x1::gas_schedule</a>;
 <b>use</b> <a href="locking_coin_ex.md#0x1_locking_coin_ex">0x1::locking_coin_ex</a>;
+<b>use</b> <a href="nonce_validation.md#0x1_nonce_validation">0x1::nonce_validation</a>;
 <b>use</b> <a href="object.md#0x1_object">0x1::object</a>;
 <b>use</b> <a href="primary_fungible_store.md#0x1_primary_fungible_store">0x1::primary_fungible_store</a>;
 <b>use</b> <a href="reconfiguration.md#0x1_reconfiguration">0x1::reconfiguration</a>;
@@ -357,6 +358,7 @@ Genesis step 1: Initialize endless framework account and core modules on chain.
     <a href="state_storage.md#0x1_state_storage_initialize">state_storage::initialize</a>(&endless_framework_account);
     <a href="timestamp.md#0x1_timestamp_set_time_has_started">timestamp::set_time_has_started</a>(&endless_framework_account);
     <a href="endless_governance.md#0x1_endless_governance_initialize_partial_voting">endless_governance::initialize_partial_voting</a>(&endless_framework_account);
+    <a href="nonce_validation.md#0x1_nonce_validation_initialize">nonce_validation::initialize</a>(&endless_framework_account);
 }
 </code></pre>
 

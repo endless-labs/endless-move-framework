@@ -1,7 +1,5 @@
 // Copyright © Endless
 // Copyright © Aptos Foundation
-
-// Copyright (c) Endless
 // SPDX-License-Identifier: Apache-2.0
 
 #[cfg(feature = "testing")]

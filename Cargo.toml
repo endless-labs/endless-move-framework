@@ -43,7 +43,6 @@ clap = { workspace = true }
 codespan-reporting = { workspace = true }
 crate_crypto_internal_eth_kzg_bls12_381 = {workspace = true}
 crate_crypto_internal_eth_kzg_polynomial = {workspace = true}
-crate_crypto_internal_eth_kzg_maybe_rayon = {workspace = true}
 # We need `zkcrypto/curve25519-dalek-ng` here instead of the normal `dalek-cryptography/curve25519-dalek` package. This
 # is because the `dalek-cryptography/bulletproofs` works with version 2 of `dalek-cryptography/curve25519-dalek` and
 # we work with version 3. Instead, we use `zkcrypto/bulleproofs` which relies on `zkcrypto/curve25519-dalek-ng`.
@@ -51,7 +50,6 @@ curve25519-dalek = { package = "curve25519-dalek-ng", version = "4" }
 either = { workspace = true }
 flate2 = { workspace = true }
 hex = { workspace = true }
-include_dir = { workspace = true }
 itertools = { workspace = true }
 libsecp256k1 = { workspace = true }
 log = { workspace = true }
@@ -95,8 +93,6 @@ tiny-keccak = { workspace = true }
 [dev-dependencies]
 endless-aggregator = { workspace = true, features = ["testing"] }
 endless-crypto = { workspace = true, features = ["fuzzing"] }
-endless-gas-meter = { workspace = true }
-endless-vm = { workspace = true, features = ["testing"] }
 claims = { workspace = true }
 move-cli = { workspace = true }
 move-prover = { workspace = true }

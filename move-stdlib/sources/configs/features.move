@@ -461,6 +461,20 @@ module std::features {
         is_enabled(EDS_SUPPLY_INFLATION)
     }
 
+    /// Whether orderless transactions is enabled
+    const DEFAULT_ACCOUNT_RERSOURCE: u64 = 59;
+    public fun get_default_account_resource_feature(): u64 { DEFAULT_ACCOUNT_RERSOURCE }
+    public fun default_account_resource_enbaled(): bool acquires Features {
+        is_enabled(DEFAULT_ACCOUNT_RERSOURCE)
+    }
+
+    /// Whether orderless transactions is enabled
+    const ORDERLESS_TRANSACTIONS: u64 = 60;
+    public fun get_orderless_transactions_feature(): u64 { ORDERLESS_TRANSACTIONS }
+    public fun orderless_transactions_enabled(): bool acquires Features {
+        is_enabled(ORDERLESS_TRANSACTIONS)
+    }
+
     // ============================================================================================
     // Feature Flag Implementation
 
