@@ -125,6 +125,26 @@ pub enum EntryFunctionCall {
         royalty_denominator: u64,
     },
 
+    /// Create a new collection with a custom royalty payee.
+    NftCreateCollectionWithPayee {
+        description: Vec<u8>,
+        max_supply: u64,
+        name: Vec<u8>,
+        uri: Vec<u8>,
+        mutable_description: bool,
+        mutable_royalty: bool,
+        mutable_uri: bool,
+        mutable_token_description: bool,
+        mutable_token_name: bool,
+        mutable_token_properties: bool,
+        mutable_token_uri: bool,
+        tokens_burnable_by_creator: bool,
+        tokens_freezable_by_creator: bool,
+        royalty_numerator: u64,
+        royalty_denominator: u64,
+        payee_address: AccountAddress,
+    },
+
     /// With an existing collection, directly mint a viable token into the creators account.
     NftMint {
         collection: Vec<u8>,
@@ -212,6 +232,41 @@ impl EntryFunctionCall {
                 tokens_freezable_by_creator,
                 royalty_numerator,
                 royalty_denominator,
+            ),
+            NftCreateCollectionWithPayee {
+                description,
+                max_supply,
+                name,
+                uri,
+                mutable_description,
+                mutable_royalty,
+                mutable_uri,
+                mutable_token_description,
+                mutable_token_name,
+                mutable_token_properties,
+                mutable_token_uri,
+                tokens_burnable_by_creator,
+                tokens_freezable_by_creator,
+                royalty_numerator,
+                royalty_denominator,
+                payee_address,
+            } => nft_create_collection_with_payee(
+                description,
+                max_supply,
+                name,
+                uri,
+                mutable_description,
+                mutable_royalty,
+                mutable_uri,
+                mutable_token_description,
+                mutable_token_name,
+                mutable_token_properties,
+                mutable_token_uri,
+                tokens_burnable_by_creator,
+                tokens_freezable_by_creator,
+                royalty_numerator,
+                royalty_denominator,
+                payee_address,
             ),
             NftMint {
                 collection,
@@ -562,6 +617,56 @@ pub fn nft_create_collection(
     ))
 }
 
+/// Create a new collection with a custom royalty payee.
+pub fn nft_create_collection_with_payee(
+    description: Vec<u8>,
+    max_supply: u64,
+    name: Vec<u8>,
+    uri: Vec<u8>,
+    mutable_description: bool,
+    mutable_royalty: bool,
+    mutable_uri: bool,
+    mutable_token_description: bool,
+    mutable_token_name: bool,
+    mutable_token_properties: bool,
+    mutable_token_uri: bool,
+    tokens_burnable_by_creator: bool,
+    tokens_freezable_by_creator: bool,
+    royalty_numerator: u64,
+    royalty_denominator: u64,
+    payee_address: AccountAddress,
+) -> TransactionPayload {
+    TransactionPayload::EntryFunction(EntryFunction::new(
+        ModuleId::new(
+            AccountAddress::new([
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 4,
+            ]),
+            ident_str!("nft").to_owned(),
+        ),
+        ident_str!("create_collection_with_payee").to_owned(),
+        vec![],
+        vec![
+            bcs::to_bytes(&description).unwrap(),
+            bcs::to_bytes(&max_supply).unwrap(),
+            bcs::to_bytes(&name).unwrap(),
+            bcs::to_bytes(&uri).unwrap(),
+            bcs::to_bytes(&mutable_description).unwrap(),
+            bcs::to_bytes(&mutable_royalty).unwrap(),
+            bcs::to_bytes(&mutable_uri).unwrap(),
+            bcs::to_bytes(&mutable_token_description).unwrap(),
+            bcs::to_bytes(&mutable_token_name).unwrap(),
+            bcs::to_bytes(&mutable_token_properties).unwrap(),
+            bcs::to_bytes(&mutable_token_uri).unwrap(),
+            bcs::to_bytes(&tokens_burnable_by_creator).unwrap(),
+            bcs::to_bytes(&tokens_freezable_by_creator).unwrap(),
+            bcs::to_bytes(&royalty_numerator).unwrap(),
+            bcs::to_bytes(&royalty_denominator).unwrap(),
+            bcs::to_bytes(&payee_address).unwrap(),
+        ],
+    ))
+}
+
 /// With an existing collection, directly mint a viable token into the creators account.
 pub fn nft_mint(
     collection: Vec<u8>,
@@ -792,6 +897,33 @@ mod decoder {
         }
     }
 
+    pub fn nft_create_collection_with_payee(
+        payload: &TransactionPayload,
+    ) -> Option<EntryFunctionCall> {
+        if let TransactionPayload::EntryFunction(script) = payload {
+            Some(EntryFunctionCall::NftCreateCollectionWithPayee {
+                description: bcs::from_bytes(script.args().get(0)?).ok()?,
+                max_supply: bcs::from_bytes(script.args().get(1)?).ok()?,
+                name: bcs::from_bytes(script.args().get(2)?).ok()?,
+                uri: bcs::from_bytes(script.args().get(3)?).ok()?,
+                mutable_description: bcs::from_bytes(script.args().get(4)?).ok()?,
+                mutable_royalty: bcs::from_bytes(script.args().get(5)?).ok()?,
+                mutable_uri: bcs::from_bytes(script.args().get(6)?).ok()?,
+                mutable_token_description: bcs::from_bytes(script.args().get(7)?).ok()?,
+                mutable_token_name: bcs::from_bytes(script.args().get(8)?).ok()?,
+                mutable_token_properties: bcs::from_bytes(script.args().get(9)?).ok()?,
+                mutable_token_uri: bcs::from_bytes(script.args().get(10)?).ok()?,
+                tokens_burnable_by_creator: bcs::from_bytes(script.args().get(11)?).ok()?,
+                tokens_freezable_by_creator: bcs::from_bytes(script.args().get(12)?).ok()?,
+                royalty_numerator: bcs::from_bytes(script.args().get(13)?).ok()?,
+                royalty_denominator: bcs::from_bytes(script.args().get(14)?).ok()?,
+                payee_address: bcs::from_bytes(script.args().get(15)?).ok()?,
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn nft_mint(payload: &TransactionPayload) -> Option<EntryFunctionCall> {
         if let TransactionPayload::EntryFunction(script) = payload {
             Some(EntryFunctionCall::NftMint {
@@ -880,6 +1012,10 @@ static SCRIPT_FUNCTION_DECODER_MAP: once_cell::sync::Lazy<EntryFunctionDecoderMa
         map.insert(
             "nft_create_collection".to_string(),
             Box::new(decoder::nft_create_collection),
+        );
+        map.insert(
+            "nft_create_collection_with_payee".to_string(),
+            Box::new(decoder::nft_create_collection_with_payee),
         );
         map.insert("nft_mint".to_string(), Box::new(decoder::nft_mint));
         map.insert(

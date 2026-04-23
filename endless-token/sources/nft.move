@@ -29,6 +29,8 @@ module endless_token::nft {
     const ETOKEN_NOT_BURNABLE: u64 = 5;
     /// The property map being mutated is not mutable
     const EPROPERTIES_NOT_MUTABLE: u64 = 6;
+    /// The provided signer is not the current royalty payee
+    const ENOT_ROYALTY_PAYEE: u64 = 7;
 
     #[resource_group_member(group = endless_framework::object::ObjectGroup)]
     /// Storage state for managing the no-code Collection.
@@ -52,7 +54,7 @@ module endless_token::nft {
         /// Determines if the creator can burn tokens
         tokens_burnable_by_creator: bool,
         /// Determines if the creator can freeze tokens
-        tokens_freezable_by_creator: bool,
+        tokens_freezable_by_creator: bool
     }
 
     #[resource_group_member(group = endless_framework::object::ObjectGroup)]
@@ -65,7 +67,7 @@ module endless_token::nft {
         /// Used to mutate fields
         mutator_ref: Option<token::MutatorRef>,
         /// Used to mutate properties
-        property_mutator_ref: property_map::MutatorRef,
+        property_mutator_ref: property_map::MutatorRef
     }
 
     /// Create a new collection
@@ -85,7 +87,7 @@ module endless_token::nft {
         tokens_burnable_by_creator: bool,
         tokens_freezable_by_creator: bool,
         royalty_numerator: u64,
-        royalty_denominator: u64,
+        royalty_denominator: u64
     ) {
         create_collection_object(
             creator,
@@ -107,7 +109,8 @@ module endless_token::nft {
         );
     }
 
-    public fun create_collection_object(
+    /// Create a new collection with a custom royalty payee.
+    public entry fun create_collection_with_payee(
         creator: &signer,
         description: String,
         max_supply: u64,
@@ -124,30 +127,117 @@ module endless_token::nft {
         tokens_freezable_by_creator: bool,
         royalty_numerator: u64,
         royalty_denominator: u64,
-    ): Object<EndlessCollection> {
-        let creator_addr = signer::address_of(creator);
-        let royalty = royalty::create(royalty_numerator, royalty_denominator, creator_addr);
-        let constructor_ref = collection::create_fixed_collection(
+        payee_address: address
+    ) {
+        create_collection_object_with_payee(
             creator,
             description,
             max_supply,
             name,
-            option::some(royalty),
             uri,
+            mutable_description,
+            mutable_royalty,
+            mutable_uri,
+            mutable_token_description,
+            mutable_token_name,
+            mutable_token_properties,
+            mutable_token_uri,
+            tokens_burnable_by_creator,
+            tokens_freezable_by_creator,
+            royalty_numerator,
+            royalty_denominator,
+            payee_address
         );
+    }
+
+    public fun create_collection_object(
+        creator: &signer,
+        description: String,
+        max_supply: u64,
+        name: String,
+        uri: String,
+        mutable_description: bool,
+        mutable_royalty: bool,
+        mutable_uri: bool,
+        mutable_token_description: bool,
+        mutable_token_name: bool,
+        mutable_token_properties: bool,
+        mutable_token_uri: bool,
+        tokens_burnable_by_creator: bool,
+        tokens_freezable_by_creator: bool,
+        royalty_numerator: u64,
+        royalty_denominator: u64
+    ): Object<EndlessCollection> {
+        create_collection_object_with_payee(
+            creator,
+            description,
+            max_supply,
+            name,
+            uri,
+            mutable_description,
+            mutable_royalty,
+            mutable_uri,
+            mutable_token_description,
+            mutable_token_name,
+            mutable_token_properties,
+            mutable_token_uri,
+            tokens_burnable_by_creator,
+            tokens_freezable_by_creator,
+            royalty_numerator,
+            royalty_denominator,
+            signer::address_of(creator)
+        )
+    }
+
+    public fun create_collection_object_with_payee(
+        creator: &signer,
+        description: String,
+        max_supply: u64,
+        name: String,
+        uri: String,
+        mutable_description: bool,
+        mutable_royalty: bool,
+        mutable_uri: bool,
+        mutable_token_description: bool,
+        mutable_token_name: bool,
+        mutable_token_properties: bool,
+        mutable_token_uri: bool,
+        tokens_burnable_by_creator: bool,
+        tokens_freezable_by_creator: bool,
+        royalty_numerator: u64,
+        royalty_denominator: u64,
+        payee_address: address
+    ): Object<EndlessCollection> {
+        let royalty =
+            royalty::create(royalty_numerator, royalty_denominator, payee_address);
+        let constructor_ref =
+            collection::create_fixed_collection(
+                creator,
+                description,
+                max_supply,
+                name,
+                option::some(royalty),
+                uri
+            );
 
         let object_signer = object::generate_signer(&constructor_ref);
-        let mutator_ref = if (mutable_description || mutable_uri) {
-            option::some(collection::generate_mutator_ref(&constructor_ref))
-        } else {
-            option::none()
-        };
+        let mutator_ref =
+            if (mutable_description || mutable_uri) {
+                option::some(collection::generate_mutator_ref(&constructor_ref))
+            } else {
+                option::none()
+            };
 
-        let royalty_mutator_ref = if (mutable_royalty) {
-            option::some(royalty::generate_mutator_ref(object::generate_extend_ref(&constructor_ref)))
-        } else {
-            option::none()
-        };
+        let royalty_mutator_ref =
+            if (mutable_royalty) {
+                option::some(
+                    royalty::generate_mutator_ref(
+                        object::generate_extend_ref(&constructor_ref)
+                    )
+                )
+            } else {
+                option::none()
+            };
 
         let endless_collection = EndlessCollection {
             mutator_ref,
@@ -159,7 +249,7 @@ module endless_token::nft {
             mutable_token_properties,
             mutable_token_uri,
             tokens_burnable_by_creator,
-            tokens_freezable_by_creator,
+            tokens_freezable_by_creator
         };
         move_to(&object_signer, endless_collection);
         object::object_from_constructor_ref(&constructor_ref)
@@ -174,9 +264,18 @@ module endless_token::nft {
         uri: String,
         property_keys: vector<String>,
         property_types: vector<String>,
-        property_values: vector<vector<u8>>,
+        property_values: vector<vector<u8>>
     ) acquires EndlessCollection, EndlessToken {
-        mint_token_object(creator, collection, description, name, uri, property_keys, property_types, property_values);
+        mint_token_object(
+            creator,
+            collection,
+            description,
+            name,
+            uri,
+            property_keys,
+            property_types,
+            property_values
+        );
     }
 
     /// Mint a token into an existing collection, and retrieve the object / address of the token.
@@ -188,25 +287,27 @@ module endless_token::nft {
         uri: String,
         property_keys: vector<String>,
         property_types: vector<String>,
-        property_values: vector<vector<u8>>,
+        property_values: vector<vector<u8>>
     ): Object<EndlessToken> acquires EndlessCollection, EndlessToken {
-        let constructor_ref = mint_internal(
-            creator,
-            collection,
-            description,
-            name,
-            uri,
-            property_keys,
-            property_types,
-            property_values,
-        );
+        let constructor_ref =
+            mint_internal(
+                creator,
+                collection,
+                description,
+                name,
+                uri,
+                property_keys,
+                property_types,
+                property_values
+            );
 
         let collection = collection_object(creator, &collection);
 
         // If tokens are freezable, add a transfer ref to be able to freeze transfers
         let freezable_by_creator = are_collection_tokens_freezable(collection);
         if (freezable_by_creator) {
-            let endless_token_addr = object::address_from_constructor_ref(&constructor_ref);
+            let endless_token_addr =
+                object::address_from_constructor_ref(&constructor_ref);
             let endless_token = borrow_global_mut<EndlessToken>(endless_token_addr);
             let transfer_ref = object::generate_transfer_ref(&constructor_ref);
             option::fill(&mut endless_token.transfer_ref, transfer_ref);
@@ -225,7 +326,7 @@ module endless_token::nft {
         property_keys: vector<String>,
         property_types: vector<String>,
         property_values: vector<vector<u8>>,
-        soul_bound_to: address,
+        soul_bound_to: address
     ) acquires EndlessCollection {
         mint_soul_bound_token_object(
             creator,
@@ -250,18 +351,19 @@ module endless_token::nft {
         property_keys: vector<String>,
         property_types: vector<String>,
         property_values: vector<vector<u8>>,
-        soul_bound_to: address,
+        soul_bound_to: address
     ): Object<EndlessToken> acquires EndlessCollection {
-        let constructor_ref = mint_internal(
-            creator,
-            collection,
-            description,
-            name,
-            uri,
-            property_keys,
-            property_types,
-            property_values,
-        );
+        let constructor_ref =
+            mint_internal(
+                creator,
+                collection,
+                description,
+                name,
+                uri,
+                property_keys,
+                property_types,
+                property_values
+            );
 
         let transfer_ref = object::generate_transfer_ref(&constructor_ref);
         let linear_transfer_ref = object::generate_linear_transfer_ref(&transfer_ref);
@@ -279,52 +381,60 @@ module endless_token::nft {
         uri: String,
         property_keys: vector<String>,
         property_types: vector<String>,
-        property_values: vector<vector<u8>>,
+        property_values: vector<vector<u8>>
     ): ConstructorRef acquires EndlessCollection {
-        let constructor_ref = token::create(creator, collection, description, name, option::none(), uri);
+        let constructor_ref =
+            token::create(
+                creator,
+                collection,
+                description,
+                name,
+                option::none(),
+                uri
+            );
 
         let object_signer = object::generate_signer(&constructor_ref);
 
         let collection_obj = collection_object(creator, &collection);
         let collection = borrow_collection(&collection_obj);
 
-        let mutator_ref = if (
-            collection.mutable_token_description
+        let mutator_ref =
+            if (collection.mutable_token_description
                 || collection.mutable_token_name
-                || collection.mutable_token_uri
-        ) {
-            option::some(token::generate_mutator_ref(&constructor_ref))
-        } else {
-            option::none()
-        };
+                || collection.mutable_token_uri) {
+                option::some(token::generate_mutator_ref(&constructor_ref))
+            } else {
+                option::none()
+            };
 
-        let burn_ref = if (collection.tokens_burnable_by_creator) {
-            option::some(token::generate_burn_ref(&constructor_ref))
-        } else {
-            option::none()
-        };
+        let burn_ref =
+            if (collection.tokens_burnable_by_creator) {
+                option::some(token::generate_burn_ref(&constructor_ref))
+            } else {
+                option::none()
+            };
 
         let endless_token = EndlessToken {
             burn_ref,
             transfer_ref: option::none(),
             mutator_ref,
-            property_mutator_ref: property_map::generate_mutator_ref(&constructor_ref),
+            property_mutator_ref: property_map::generate_mutator_ref(&constructor_ref)
         };
         move_to(&object_signer, endless_token);
 
-        let properties = property_map::prepare_input(property_keys, property_types, property_values);
+        let properties =
+            property_map::prepare_input(property_keys, property_types, property_values);
         property_map::init(&constructor_ref, properties);
 
         constructor_ref
     }
 
     // Token accessors
-
     inline fun borrow<T: key>(token: &Object<T>): &EndlessToken {
         let token_address = object::object_address(token);
         assert!(
             exists<EndlessToken>(token_address),
-            error::not_found(ETOKEN_DOES_NOT_EXIST),
+            error::not_found(ETOKEN_DOES_NOT_EXIST)
         );
         borrow_global<EndlessToken>(token_address)
     }
@@ -361,17 +471,18 @@ module endless_token::nft {
     }
 
     // Token mutators
-
-    inline fun authorized_borrow<T: key>(token: &Object<T>, creator: &signer): &EndlessToken {
+    inline fun authorized_borrow<T: key>(
+        token: &Object<T>, creator: &signer
+    ): &EndlessToken {
         let token_address = object::object_address(token);
         assert!(
             exists<EndlessToken>(token_address),
-            error::not_found(ETOKEN_DOES_NOT_EXIST),
+            error::not_found(ETOKEN_DOES_NOT_EXIST)
         );
 
         assert!(
             token::creator(*token) == signer::address_of(creator),
-            error::permission_denied(ENOT_CREATOR),
+            error::permission_denied(ENOT_CREATOR)
         );
         borrow_global<EndlessToken>(token_address)
     }
@@ -380,7 +491,7 @@ module endless_token::nft {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             option::is_some(&endless_token.burn_ref),
-            error::permission_denied(ETOKEN_NOT_BURNABLE),
+            error::permission_denied(ETOKEN_NOT_BURNABLE)
         );
         move endless_token;
         let endless_token = move_from<EndlessToken>(object::object_address(&token));
@@ -388,70 +499,59 @@ module endless_token::nft {
             burn_ref,
             transfer_ref: _,
             mutator_ref: _,
-            property_mutator_ref,
+            property_mutator_ref
         } = endless_token;
         property_map::burn(property_mutator_ref);
         token::burn(option::extract(&mut burn_ref));
     }
 
-    public entry fun freeze_transfer<T: key>(creator: &signer, token: Object<T>) acquires EndlessCollection, EndlessToken {
+    public entry fun freeze_transfer<T: key>(
+        creator: &signer, token: Object<T>
+    ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_collection_tokens_freezable(token::collection_object(token))
                 && option::is_some(&endless_token.transfer_ref),
-            error::permission_denied(EFIELD_NOT_MUTABLE),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
         );
         object::disable_ungated_transfer(option::borrow(&endless_token.transfer_ref));
     }
 
     public entry fun unfreeze_transfer<T: key>(
-        creator: &signer,
-        token: Object<T>
+        creator: &signer, token: Object<T>
     ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_collection_tokens_freezable(token::collection_object(token))
                 && option::is_some(&endless_token.transfer_ref),
-            error::permission_denied(EFIELD_NOT_MUTABLE),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
         );
         object::enable_ungated_transfer(option::borrow(&endless_token.transfer_ref));
     }
 
     public entry fun set_description<T: key>(
-        creator: &signer,
-        token: Object<T>,
-        description: String,
+        creator: &signer, token: Object<T>, description: String
     ) acquires EndlessCollection, EndlessToken {
         assert!(
             is_mutable_description(token),
-            error::permission_denied(EFIELD_NOT_MUTABLE),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
         );
         let endless_token = authorized_borrow(&token, creator);
         token::set_description(option::borrow(&endless_token.mutator_ref), description);
     }
 
     public entry fun set_name<T: key>(
-        creator: &signer,
-        token: Object<T>,
-        name: String,
+        creator: &signer, token: Object<T>, name: String
     ) acquires EndlessCollection, EndlessToken {
-        assert!(
-            is_mutable_name(token),
-            error::permission_denied(EFIELD_NOT_MUTABLE),
-        );
+        assert!(is_mutable_name(token), error::permission_denied(EFIELD_NOT_MUTABLE));
         let endless_token = authorized_borrow(&token, creator);
         token::set_name(option::borrow(&endless_token.mutator_ref), name);
     }
 
     public entry fun set_uri<T: key>(
-        creator: &signer,
-        token: Object<T>,
-        uri: String,
+        creator: &signer, token: Object<T>, uri: String
     ) acquires EndlessCollection, EndlessToken {
-        assert!(
-            is_mutable_uri(token),
-            error::permission_denied(EFIELD_NOT_MUTABLE),
-        );
+        assert!(is_mutable_uri(token), error::permission_denied(EFIELD_NOT_MUTABLE));
         let endless_token = authorized_borrow(&token, creator);
         token::set_uri(option::borrow(&endless_token.mutator_ref), uri);
     }
@@ -461,41 +561,41 @@ module endless_token::nft {
         token: Object<T>,
         key: String,
         type: String,
-        value: vector<u8>,
+        value: vector<u8>
     ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_properties_mutable(token),
-            error::permission_denied(EPROPERTIES_NOT_MUTABLE),
+            error::permission_denied(EPROPERTIES_NOT_MUTABLE)
         );
 
-        property_map::add(&endless_token.property_mutator_ref, key, type, value);
+        property_map::add(
+            &endless_token.property_mutator_ref,
+            key,
+            type,
+            value
+        );
     }
 
     public entry fun add_typed_property<T: key, V: drop>(
-        creator: &signer,
-        token: Object<T>,
-        key: String,
-        value: V,
+        creator: &signer, token: Object<T>, key: String, value: V
     ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_properties_mutable(token),
-            error::permission_denied(EPROPERTIES_NOT_MUTABLE),
+            error::permission_denied(EPROPERTIES_NOT_MUTABLE)
         );
 
         property_map::add_typed(&endless_token.property_mutator_ref, key, value);
     }
 
     public entry fun remove_property<T: key>(
-        creator: &signer,
-        token: Object<T>,
-        key: String,
+        creator: &signer, token: Object<T>, key: String
     ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_properties_mutable(token),
-            error::permission_denied(EPROPERTIES_NOT_MUTABLE),
+            error::permission_denied(EPROPERTIES_NOT_MUTABLE)
         );
 
         property_map::remove(&endless_token.property_mutator_ref, &key);
@@ -506,36 +606,39 @@ module endless_token::nft {
         token: Object<T>,
         key: String,
         type: String,
-        value: vector<u8>,
+        value: vector<u8>
     ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_properties_mutable(token),
-            error::permission_denied(EPROPERTIES_NOT_MUTABLE),
+            error::permission_denied(EPROPERTIES_NOT_MUTABLE)
         );
 
-        property_map::update(&endless_token.property_mutator_ref, &key, type, value);
+        property_map::update(
+            &endless_token.property_mutator_ref,
+            &key,
+            type,
+            value
+        );
     }
 
     public entry fun update_typed_property<T: key, V: drop>(
-        creator: &signer,
-        token: Object<T>,
-        key: String,
-        value: V,
+        creator: &signer, token: Object<T>, key: String, value: V
     ) acquires EndlessCollection, EndlessToken {
         let endless_token = authorized_borrow(&token, creator);
         assert!(
             are_properties_mutable(token),
-            error::permission_denied(EPROPERTIES_NOT_MUTABLE),
+            error::permission_denied(EPROPERTIES_NOT_MUTABLE)
         );
 
         property_map::update_typed(&endless_token.property_mutator_ref, &key, value);
     }
 
     // Collection accessors
-
-    inline fun collection_object(creator: &signer, name: &String): Object<EndlessCollection> {
-        let collection_addr = collection::create_collection_address(&signer::address_of(creator), name);
+    inline fun collection_object(creator: &signer, name: &String)
+        : Object<EndlessCollection> {
+        let collection_addr =
+            collection::create_collection_address(&signer::address_of(creator), name);
         object::address_to_object<EndlessCollection>(collection_addr)
     }
 
@@ -543,104 +646,105 @@ module endless_token::nft {
         let collection_address = object::object_address(token);
         assert!(
             exists<EndlessCollection>(collection_address),
-            error::not_found(ECOLLECTION_DOES_NOT_EXIST),
+            error::not_found(ECOLLECTION_DOES_NOT_EXIST)
         );
         borrow_global<EndlessCollection>(collection_address)
     }
 
     public fun is_mutable_collection_description<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).mutable_description
     }
 
     public fun is_mutable_collection_royalty<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         option::is_some(&borrow_collection(&collection).royalty_mutator_ref)
     }
 
     public fun is_mutable_collection_uri<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).mutable_uri
     }
 
     public fun is_mutable_collection_token_description<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).mutable_token_description
     }
 
     public fun is_mutable_collection_token_name<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).mutable_token_name
     }
 
     public fun is_mutable_collection_token_uri<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).mutable_token_uri
     }
 
     public fun is_mutable_collection_token_properties<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).mutable_token_properties
     }
 
     public fun are_collection_tokens_burnable<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).tokens_burnable_by_creator
     }
 
     public fun are_collection_tokens_freezable<T: key>(
-        collection: Object<T>,
+        collection: Object<T>
     ): bool acquires EndlessCollection {
         borrow_collection(&collection).tokens_freezable_by_creator
     }
 
     // Collection mutators
-
-    inline fun authorized_borrow_collection<T: key>(collection: &Object<T>, creator: &signer): &EndlessCollection {
+    inline fun authorized_borrow_collection<T: key>(
+        collection: &Object<T>, creator: &signer
+    ): &EndlessCollection {
         let collection_address = object::object_address(collection);
         assert!(
             exists<EndlessCollection>(collection_address),
-            error::not_found(ECOLLECTION_DOES_NOT_EXIST),
+            error::not_found(ECOLLECTION_DOES_NOT_EXIST)
         );
         assert!(
             collection::creator(*collection) == signer::address_of(creator),
-            error::permission_denied(ENOT_CREATOR),
+            error::permission_denied(ENOT_CREATOR)
         );
         borrow_global<EndlessCollection>(collection_address)
     }
 
     public entry fun set_collection_description<T: key>(
-        creator: &signer,
-        collection: Object<T>,
-        description: String,
+        creator: &signer, collection: Object<T>, description: String
     ) acquires EndlessCollection {
         let endless_collection = authorized_borrow_collection(&collection, creator);
         assert!(
             endless_collection.mutable_description,
-            error::permission_denied(EFIELD_NOT_MUTABLE),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
         );
-        collection::set_description(option::borrow(&endless_collection.mutator_ref), description);
+        collection::set_description(
+            option::borrow(&endless_collection.mutator_ref), description
+        );
     }
 
     public fun set_collection_royalties<T: key>(
-        creator: &signer,
-        collection: Object<T>,
-        royalty: royalty::Royalty,
+        creator: &signer, collection: Object<T>, royalty: royalty::Royalty
     ) acquires EndlessCollection {
         let endless_collection = authorized_borrow_collection(&collection, creator);
         assert!(
             option::is_some(&endless_collection.royalty_mutator_ref),
-            error::permission_denied(EFIELD_NOT_MUTABLE),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
         );
-        royalty::update(option::borrow(&endless_collection.royalty_mutator_ref), royalty);
+        royalty::update(
+            option::borrow(&endless_collection.royalty_mutator_ref), royalty
+        );
     }
 
     entry fun set_collection_royalties_call<T: key>(
@@ -648,29 +752,61 @@ module endless_token::nft {
         collection: Object<T>,
         royalty_numerator: u64,
         royalty_denominator: u64,
-        payee_address: address,
+        payee_address: address
     ) acquires EndlessCollection {
-        let royalty = royalty::create(royalty_numerator, royalty_denominator, payee_address);
+        let royalty =
+            royalty::create(royalty_numerator, royalty_denominator, payee_address);
         set_collection_royalties(creator, collection, royalty);
     }
 
+    public entry fun transfer_collection_royalty_payee_entry<T: key>(
+        payee: &signer, collection: Object<T>, new_payee_address: address
+    ) acquires EndlessCollection {
+        transfer_collection_royalty_payee(payee, collection, new_payee_address);
+    }
+
+    public fun transfer_collection_royalty_payee<T: key>(
+        payee: &signer, collection: Object<T>, new_payee_address: address
+    ) acquires EndlessCollection {
+        let endless_collection = borrow_collection(&collection);
+        assert!(
+            option::is_some(&endless_collection.royalty_mutator_ref),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
+        );
+
+        let current_royalty = option::extract(&mut royalty::get(collection));
+        assert!(
+            royalty::payee_address(&current_royalty) == signer::address_of(payee),
+            error::permission_denied(ENOT_ROYALTY_PAYEE)
+        );
+
+        let new_royalty =
+            royalty::create(
+                royalty::numerator(&current_royalty),
+                royalty::denominator(&current_royalty),
+                new_payee_address
+            );
+        royalty::update(
+            option::borrow(&endless_collection.royalty_mutator_ref),
+            new_royalty
+        );
+    }
+
     public entry fun set_collection_uri<T: key>(
-        creator: &signer,
-        collection: Object<T>,
-        uri: String,
+        creator: &signer, collection: Object<T>, uri: String
     ) acquires EndlessCollection {
         let endless_collection = authorized_borrow_collection(&collection, creator);
         assert!(
             endless_collection.mutable_uri,
-            error::permission_denied(EFIELD_NOT_MUTABLE),
+            error::permission_denied(EFIELD_NOT_MUTABLE)
         );
         collection::set_uri(option::borrow(&endless_collection.mutator_ref), uri);
     }
 
     // Tests
-
     #[test_only]
     use std::string;
+
     #[test_only]
     use endless_framework::account;
 
@@ -698,17 +834,18 @@ module endless_token::nft {
         let creator_addr = signer::address_of(creator);
         account::create_account_for_test(creator_addr);
 
-        let token = mint_soul_bound_token_object(
-            creator,
-            collection_name,
-            string::utf8(b""),
-            token_name,
-            string::utf8(b""),
-            vector[],
-            vector[],
-            vector[],
-            signer::address_of(bob),
-        );
+        let token =
+            mint_soul_bound_token_object(
+                creator,
+                collection_name,
+                string::utf8(b""),
+                token_name,
+                string::utf8(b""),
+                vector[],
+                vector[],
+                vector[],
+                signer::address_of(bob)
+            );
 
         object::transfer(bob, token, @0x345);
     }
@@ -739,7 +876,9 @@ module endless_token::nft {
 
     #[test(creator = @0x123, another = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
-    fun test_noncreator_freeze(creator: &signer, another: &signer) acquires EndlessCollection, EndlessToken {
+    fun test_noncreator_freeze(
+        creator: &signer, another: &signer
+    ) acquires EndlessCollection, EndlessToken {
         let collection_name = string::utf8(b"collection name");
         let token_name = string::utf8(b"token name");
 
@@ -750,7 +889,9 @@ module endless_token::nft {
 
     #[test(creator = @0x123, another = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
-    fun test_noncreator_unfreeze(creator: &signer, another: &signer) acquires EndlessCollection, EndlessToken {
+    fun test_noncreator_unfreeze(
+        creator: &signer, another: &signer
+    ) acquires EndlessCollection, EndlessToken {
         let collection_name = string::utf8(b"collection name");
         let token_name = string::utf8(b"token name");
 
@@ -789,8 +930,7 @@ module endless_token::nft {
     #[test(creator = @0x123, noncreator = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
     fun test_set_description_non_creator(
-        creator: &signer,
-        noncreator: &signer,
+        creator: &signer, noncreator: &signer
     ) acquires EndlessCollection, EndlessToken {
         let collection_name = string::utf8(b"collection name");
         let token_name = string::utf8(b"token name");
@@ -831,8 +971,7 @@ module endless_token::nft {
     #[test(creator = @0x123, noncreator = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
     fun test_set_name_non_creator(
-        creator: &signer,
-        noncreator: &signer,
+        creator: &signer, noncreator: &signer
     ) acquires EndlessCollection, EndlessToken {
         let collection_name = string::utf8(b"collection name");
         let token_name = string::utf8(b"token name");
@@ -873,8 +1012,7 @@ module endless_token::nft {
     #[test(creator = @0x123, noncreator = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
     fun test_set_uri_non_creator(
-        creator: &signer,
-        noncreator: &signer,
+        creator: &signer, noncreator: &signer
     ) acquires EndlessCollection, EndlessToken {
         let collection_name = string::utf8(b"collection name");
         let token_name = string::utf8(b"token name");
@@ -915,8 +1053,7 @@ module endless_token::nft {
     #[test(creator = @0x123, noncreator = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
     fun test_burn_non_creator(
-        creator: &signer,
-        noncreator: &signer,
+        creator: &signer, noncreator: &signer
     ) acquires EndlessCollection, EndlessToken {
         let collection_name = string::utf8(b"collection name");
         let token_name = string::utf8(b"token name");
@@ -948,8 +1085,7 @@ module endless_token::nft {
     #[test(creator = @0x123, noncreator = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
     fun test_set_collection_description_non_creator(
-        creator: &signer,
-        noncreator: &signer,
+        creator: &signer, noncreator: &signer
     ) acquires EndlessCollection {
         let collection_name = string::utf8(b"collection name");
         let collection = create_collection_helper(creator, collection_name, true);
@@ -977,8 +1113,7 @@ module endless_token::nft {
     #[test(creator = @0x123, noncreator = @0x456)]
     #[expected_failure(abort_code = 0x50003, location = Self)]
     fun test_set_collection_uri_non_creator(
-        creator: &signer,
-        noncreator: &signer,
+        creator: &signer, noncreator: &signer
     ) acquires EndlessCollection {
         let collection_name = string::utf8(b"collection name");
         let collection = create_collection_helper(creator, collection_name, true);
@@ -994,7 +1129,13 @@ module endless_token::nft {
 
         create_collection_helper(creator, collection_name, true);
         let token = mint_helper(creator, collection_name, token_name);
-        add_property(creator, token, property_name, property_type, vector [ 0x08 ]);
+        add_property(
+            creator,
+            token,
+            property_name,
+            property_type,
+            vector[0x08]
+        );
 
         assert!(property_map::read_u8(&token, &property_name) == 0x8, 0);
     }
@@ -1021,7 +1162,13 @@ module endless_token::nft {
 
         create_collection_helper(creator, collection_name, true);
         let token = mint_helper(creator, collection_name, token_name);
-        update_property(creator, token, property_name, property_type, vector [ 0x00 ]);
+        update_property(
+            creator,
+            token,
+            property_name,
+            property_type,
+            vector[0x00]
+        );
 
         assert!(!property_map::read_bool(&token, &property_name), 0);
     }
@@ -1064,11 +1211,95 @@ module endless_token::nft {
         assert!(royalty_before != royalty_after, 0);
     }
 
+    #[test(creator = @0x123, payee = @0x456)]
+    fun test_transfer_collection_royalty_payee(
+        creator: &signer, payee: &signer
+    ) acquires EndlessCollection {
+        let collection =
+            create_collection_object_with_payee(
+                creator,
+                string::utf8(b"collection description"),
+                1,
+                string::utf8(b"collection royalty transfer"),
+                string::utf8(b"collection uri"),
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                1,
+                100,
+                signer::address_of(payee)
+            );
+
+        transfer_collection_royalty_payee(payee, collection, @0x789);
+        let updated_royalty = option::extract(&mut royalty::get(collection));
+        assert!(royalty::payee_address(&updated_royalty) == @0x789, 0);
+    }
+
+    #[test(creator = @0x123, payee = @0x456, nonpayee = @0x789)]
+    #[expected_failure(abort_code = 0x50007, location = Self)]
+    fun test_transfer_collection_royalty_payee_non_payee(
+        creator: &signer, payee: &signer, nonpayee: &signer
+    ) acquires EndlessCollection {
+        let collection =
+            create_collection_object_with_payee(
+                creator,
+                string::utf8(b"collection description"),
+                1,
+                string::utf8(b"collection royalty transfer unauthorized"),
+                string::utf8(b"collection uri"),
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                1,
+                100,
+                signer::address_of(payee)
+            );
+
+        transfer_collection_royalty_payee(nonpayee, collection, @0xabc);
+    }
+
+    #[test(creator = @0x123)]
+    fun test_create_collection_object_with_payee(creator: &signer) {
+        let collection =
+            create_collection_object_with_payee(
+                creator,
+                string::utf8(b"collection description"),
+                1,
+                string::utf8(b"collection with custom payee"),
+                string::utf8(b"collection uri"),
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                1,
+                100,
+                @0x456
+            );
+
+        let collection_royalty = option::extract(&mut royalty::get(collection));
+        assert!(royalty::payee_address(&collection_royalty) == @0x456, 0);
+    }
+
     #[test_only]
     fun create_collection_helper(
-        creator: &signer,
-        collection_name: String,
-        flag: bool,
+        creator: &signer, collection_name: String, flag: bool
     ): Object<EndlessCollection> {
         create_collection_object(
             creator,
@@ -1086,15 +1317,13 @@ module endless_token::nft {
             flag,
             flag,
             1,
-            100,
+            100
         )
     }
 
     #[test_only]
     fun mint_helper(
-        creator: &signer,
-        collection_name: String,
-        token_name: String,
+        creator: &signer, collection_name: String, token_name: String
     ): Object<EndlessToken> acquires EndlessCollection, EndlessToken {
         let creator_addr = signer::address_of(creator);
         account::create_account_for_test(creator_addr);
@@ -1107,7 +1336,8 @@ module endless_token::nft {
             string::utf8(b"uri"),
             vector[string::utf8(b"bool")],
             vector[string::utf8(b"bool")],
-            vector[vector[0x01]],
+            vector[vector[0x01]]
         )
     }
 }
+
